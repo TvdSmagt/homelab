@@ -34,28 +34,21 @@ Growatt inverter ── ShineWiFi/LAN ──► grott:5279 ──► server.grow
 
 ## Point the Growatt datalogger at Grott
 
-The datalogger must send its data to this Pi (`192.168.2.26`, eth0) instead of `server.growatt.com`.
-Grott forwards everything to Growatt, so the ShinePhone app and growatt.com keep working.
+The ShineLAN logger (`192.168.2.18`) must send its data to this Pi (`192.168.2.26`, eth0) instead of
+`server.growatt.com`. Change its server address in its own web UI; Grott forwards everything to Growatt,
+so the Zelfstroom / Growatt portal and app keep working.
 
-**Option A: via the Growatt server (easiest).** Log in at <https://server.growatt.com> →
-*Configuration* → *Datalogger* → select your datalogger → *Setting* → *Advanced setting*:
-- set **Server IP / domain** to `192.168.2.26`, password `growattYYYYMMDD` (today's date)
-- the datalogger restarts and connects to Grott.
+Device details, exact settings, rollback and setup status: [docs/growatt-datalogger.md](docs/growatt-datalogger.md).
 
-**Option B: datalogger web UI.** Connect to the ShineWiFi's own access point (or its LAN IP),
-open `http://192.168.10.100` (default login `admin` / `12345678`), and under *Advanced Settings* set the
-server address to `192.168.2.26`, port `5279`.
-
-**Option C: DNS.** Resolve `server.growatt.com` to `192.168.2.26` in your router/DNS.
+Alternative without touching the logger: resolve `server.growatt.com` to `192.168.2.26` in DNS.
 In that case set `ip = 47.91.67.66` (the real Growatt IP) under `[Growatt]` in `grott/grott.ini`, otherwise Grott loops.
-
-Give the Pi a fixed DHCP lease in the router so the address does not change.
 
 ## Home Assistant
 
 1. Open `http://192.168.2.26:8123` and complete onboarding.
 2. *Settings → Devices & services → Add integration → MQTT*: broker `localhost`, port `1883`,
-   with `MQTT_USER` / `MQTT_PASSWORD` from `.env`.
+   with `MQTT_USER` / `MQTT_PASSWORD` from `.env` (`grep MQTT .env`). `localhost` works because
+   Home Assistant uses host networking and Mosquitto publishes port 1883 on the host.
 3. Once the datalogger sends data (every ~5 min), a **Growatt** device appears automatically.
 4. Energy dashboard: *Settings → Dashboards → Energy → Add solar production* →
    the inverter's *Generated energy (Total)* sensor.
@@ -78,5 +71,6 @@ compose.yaml          all services
 mosquitto/            broker config
 grott/                grott config + HA extension
 scripts/              helper scripts
+docs/                 device notes (Growatt datalogger, ...)
 data/                 runtime state (not committed)
 ```
