@@ -42,6 +42,11 @@ Avoid the cheapest no-name cables. Status: being ordered.
 The IKEA GRILLPLATS smart plugs are Matter over **Thread**, so a Thread border router is needed.
 They also measure power usage.
 
+**Use:** per-appliance metering of the dishwasher, washing machine, dryer, etc. (see section 4).
+Check the plug's maximum load against the appliance (dryers and washers can draw 2-2.5 kW) and whether
+Home Assistant exposes a kWh energy sensor, not only power in W (the Energy dashboard needs kWh;
+otherwise add a Riemann sum helper on the power sensor).
+
 **Hardware:** Home Assistant Connect **ZBT-2** (Nabu Casa, EAN 860011789741), ~€50, run with
 Thread firmware. Not the ZWA-2 (that is Z-Wave only). One radio does Zigbee *or* Thread, not both;
 a second radio is needed if Zigbee devices are added later.
@@ -71,3 +76,42 @@ For access from outside, options:
 - **Tailscale** (free, preferred): VPN on the Pi and the phone, no ports opened. Needs a one-time install on the host.
 - **Home Assistant Cloud / Nabu Casa** (~€7.50/month): easiest, supports Home Assistant development.
 - Port forwarding: not recommended.
+
+## 4. Energy insight and load shifting
+
+**Goal:** see how much is used and when, find what can move to another moment (sun surplus, cheap
+hours), and collect data to size solar panels and a home battery for the new-build house. Heat pump
+and EV are planned there, so today's profile is only a baseline.
+
+**Measurement layers:**
+| Layer | Source | Resolution |
+|---|---|---|
+| Total import/export/consumption | P1 (section 1) | seconds, kept as hourly statistics |
+| Shiftable appliances | IKEA plugs (section 2) | kWh counter per appliance |
+| Solar production | Growatt via Grott | ~5 min |
+| Heat pump | see below | ~hourly |
+
+**Recorder (write once the P1 entities exist, so the entity names are known):**
+- Hourly long-term statistics are kept forever by default (~100 MB for 2 years): enough for a first estimate.
+- Do not raise `purge_keep_days` to 730: raw P1 states would grow to tens of GB/year.
+  Exclude the fast P1 power sensors from `recorder`, keep the kWh counters.
+- Battery sizing needs quarter-hour data; HA keeps 5-minute statistics only 10 days. Plan: a nightly
+  export of `statistics_short_term` for the totals and the appliance counters to CSV.
+- Collect at least one full year (summer and winter) before sizing anything.
+
+**Insight:** Energy dashboard with *Individual devices*, a usage heatmap (hour of day x day of year, ApexCharts),
+`utility_meter` for day/night or dynamic-tariff splits later.
+
+**Sizing notes:**
+- Yield per kWp from the current array only applies to this roof; use PVGIS for the new roof
+  (tilt, azimuth). Record the current system's kWp.
+- Net metering (salderen) ends 2027-01-01 in NL, which makes self-consumption worth more than export.
+
+**Heat pump (new-build, probably Itho Daalderop):** no official Home Assistant integration.
+- WPU: the community [Itho WiFi add-on](https://github.com/arjenhiemstra/ithowifi) publishes to MQTT
+  (Mosquitto already runs), with the HACS integration `haithowifi` on top. Energy counters need
+  WPU firmware >= 34 and are polled ~hourly. Newer units may use the NRG.watch interface (MQTT); unverified.
+- Control is limited to boost/block (RS485 per a third-party vendor); no Modbus support confirmed.
+- Ask the installer before purchase: exact model, which local interface (MQTT / Modbus / NRG.watch),
+  and a separate kWh meter on the heat pump group for quarter-hour data.
+- The new house will have its own meter (check DSMR version; the P1 cable can move with the Pi).
