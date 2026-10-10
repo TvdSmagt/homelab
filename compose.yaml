@@ -1,0 +1,49 @@
+name: homelab
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./data/mosquitto:/mosquitto/data
+    environment:
+      - TZ=${TZ}
+
+  # Grott runs as a proxy between the Growatt ShineWiFi/ShineLAN datalogger and
+  # server.growatt.com, decoding the data and publishing it to MQTT.
+  grott:
+    image: ledidobe/grott:2.8.3_240731
+    container_name: grott
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "5279:5279"
+    volumes:
+      - ./grott/grott.ini:/app/grott.ini:ro
+      - ./grott/grott_ha.py:/app/grott_ha.py:ro
+    environment:
+      - TZ=${TZ}
+      # Secrets come from .env; everything else lives in grott/grott.ini.
+      - gmqttauth=True
+      - gmqttuser=${MQTT_USER}
+      - gmqttpassword=${MQTT_PASSWORD}
+      - 'gextvar={"ha_mqtt_host": "mosquitto", "ha_mqtt_port": 1883, "ha_mqtt_user": "${MQTT_USER}", "ha_mqtt_password": "${MQTT_PASSWORD}"}'
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./data/homeassistant:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+    environment:
+      - TZ=${TZ}
