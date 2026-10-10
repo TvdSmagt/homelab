@@ -107,6 +107,19 @@ is planned there (EV charger later), so today's profile is only a baseline.
   (tilt, azimuth). Record the current system's kWp.
 - Net metering (salderen) ends 2027-01-01 in NL, which makes self-consumption worth more than export.
 
+**Dynamic contract what-if (later):** current supplier is Budget Energie (no API known, fixed tariffs go in
+the config). To see what the same usage would have cost on a dynamic contract:
+- Prices: day-ahead market prices per hour (per quarter-hour since the market moved to 15 min; check),
+  e.g. the Home Assistant `EnergyZero` or `Nord Pool` integration, or the EnergyZero / ENTSO-E API for
+  history (ENTSO-E needs a free API key). Unverified which of these serves past dates easily; check first.
+- Usage: hourly import and export kWh from the P1 statistics (section 1), so start collecting now;
+  prices can be fetched for past dates later.
+- Calculation: per hour `import kWh x (market price + supplier markup + energy tax) - export kWh x (market price - feed-in fee)`,
+  plus VAT, summed per month, next to the actual Budget Energie cost. Take markup, fixed fees and feed-in
+  terms from one or two real dynamic offers. Do it in a script or a notebook, not as live sensors.
+- Include the post-2027-01-01 feed-in situation, since export will then be worth less than import.
+- Keep the P1 data exportable (see Recorder) so this can be run later without the HA database.
+
 **Heat pump (new-build, probably Itho Daalderop):** no official Home Assistant integration.
 - WPU: the community [Itho WiFi add-on](https://github.com/arjenhiemstra/ithowifi) publishes to MQTT
   (Mosquitto already runs), with the HACS integration `haithowifi` on top. Energy counters need
