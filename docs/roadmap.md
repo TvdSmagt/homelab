@@ -80,8 +80,8 @@ For access from outside, options:
 ## 4. Energy insight and load shifting
 
 **Goal:** see how much is used and when, find what can move to another moment (sun surplus, cheap
-hours), and collect data to size solar panels and a home battery for the new-build house. Heat pump
-and EV are planned there, so today's profile is only a baseline.
+hours), and collect data to size solar panels and a home battery for the new-build house. A heat pump
+is planned there (EV charger later), so today's profile is only a baseline.
 
 **Measurement layers:**
 | Layer | Source | Resolution |
@@ -112,6 +112,38 @@ and EV are planned there, so today's profile is only a baseline.
   (Mosquitto already runs), with the HACS integration `haithowifi` on top. Energy counters need
   WPU firmware >= 34 and are polled ~hourly. Newer units may use the NRG.watch interface (MQTT); unverified.
 - Control is limited to boost/block (RS485 per a third-party vendor); no Modbus support confirmed.
-- Ask the installer before purchase: exact model, which local interface (MQTT / Modbus / NRG.watch),
-  and a separate kWh meter on the heat pump group for quarter-hour data.
 - The new house will have its own meter (check DSMR version; the P1 cable can move with the Pi).
+
+**Rough heat pump estimate (ground-source, A++++ semi-detached, 170 m2, pitched roof):**
+Order-of-magnitude only, to be replaced by the installer's calculation and later by measured data.
+- Space heating: ~15-30 kWh/m2/year thermal, so ~2,500-5,000 kWh. Hot water: ~2,000-3,500 kWh (depends on household size).
+- Seasonal COP ~4-5 (floor heating, low flow temperature; hot water is lower, ~3). Electricity: **~1,200-2,200 kWh/year**
+  for the heat pump, on top of household base load.
+- Mostly in Nov-Feb when solar yield is lowest, so panels cover little of it and a battery (daily cycle) barely helps.
+  Hot water, however, runs year-round and can be shifted to sunny hours; floor heating buffers heat for hours.
+- Design heat loss is probably only ~3-5 kW, so electrical peak draw of the heat pump itself is modest
+  (backup element, if any, is the large load; ask).
+
+**Questions for installer / seller:**
+1. Exact heat pump model and firmware (Itho WPU or other; to my knowledge the WPU is the ground-source line, confirm).
+2. Which **local** interface (no cloud): MQTT, Modbus (TCP/RS485), NRG.watch? Standard or optional?
+3. Can energy use (kWh) be read, how often is it refreshed, which firmware is needed?
+4. What control is possible (boost, block, power) and is it local or cloud only?
+5. Does the local interface keep working without internet, and if Itho stops the app?
+6. Is the heat pump on its own group, and can a DIN-rail kWh meter with readout (Modbus/M-Bus/WiFi) be fitted there?
+7. Smart meter: which DSMR version, is the P1 port free and enabled?
+8. Meter cabinet: room and 230 V for a Pi, network (UTP) or WiFi coverage?
+9. Connection capacity (e.g. 3x25 A vs 3x35 A): enough for heat pump, induction and a possible battery/EV later? Upgrade cost?
+10. Is there a spare group slot and a conduit route for a later EV charger and battery?
+11. Can the solar inverter be read locally (Modbus, MQTT), not only via a cloud app?
+12. Ground loop: type (vertical bore), regulation/permit, and the backup element size.
+13. Space and a prepared group for a home battery; which inverter type (hybrid or AC-coupled) fits?
+
+Roof pitch/orientation is known (calculate in PVGIS), no shading expected, and the energy contract is
+the owner's own choice (compare feed-in terms after 2027-01-01), so those are not installer questions.
+
+## 5. EV charger (later)
+
+Not now; the owner places the charger. When it is time: choose one that reports consumption locally
+(OCPP or Modbus) and accepts a charge-power setpoint, so charging can follow solar surplus or cheap hours
+(largest shiftable load). A certified installer connects the group; check connection capacity first (question 9).
