@@ -116,8 +116,10 @@ is planned there (EV charger later), so today's profile is only a baseline.
 
 **Rough heat pump estimate (ground-source, A++++ semi-detached, 170 m2, pitched roof):**
 Order-of-magnitude only, to be replaced by the installer's calculation and later by measured data.
-- Space heating: ~15-30 kWh/m2/year thermal, so ~2,500-5,000 kWh. Hot water: ~2,000-3,500 kWh (depends on household size).
-- Seasonal COP ~4-5 (floor heating, low flow temperature; hot water is lower, ~3). Electricity: **~1,200-2,200 kWh/year**
+- Household: 2 parents, 2 young children, maybe a third later. Size for the future: hot water use grows as
+  children get older (longer showers, more laundry), so assume 4-5 persons.
+- Space heating: ~15-30 kWh/m2/year thermal, so ~2,500-5,000 kWh. Hot water: ~3,000-4,500 kWh for 4-5 persons.
+- Seasonal COP ~4-5 (floor heating, low flow temperature; hot water is lower, ~3). Electricity: **~1,300-2,400 kWh/year**
   for the heat pump, on top of household base load.
 - Mostly in Nov-Feb when solar yield is lowest, so panels cover little of it and a battery (daily cycle) barely helps.
   Hot water, however, runs year-round and can be shifted to sunny hours; floor heating buffers heat for hours.
@@ -135,12 +137,30 @@ Order-of-magnitude only, to be replaced by the installer's calculation and later
 8. Meter cabinet: room and 230 V for a Pi, network (UTP) or WiFi coverage?
 9. Connection capacity (e.g. 3x25 A vs 3x35 A): enough for heat pump, induction and a possible battery/EV later? Upgrade cost?
 10. Is there a spare group slot and a conduit route for a later EV charger and battery?
+    A mantelbuis (conduit) can be requested as an option: ask for it from the meter cabinet to the
+    car spot, and consider a second one to the battery location and a UTP cable to the cabinet.
+    Also ask for a hot water vessel sized for 4-5 persons.
 11. Can the solar inverter be read locally (Modbus, MQTT), not only via a cloud app?
 12. Ground loop: type (vertical bore), regulation/permit, and the backup element size.
 13. Space and a prepared group for a home battery; which inverter type (hybrid or AC-coupled) fits?
 
 Roof pitch/orientation is known (calculate in PVGIS), no shading expected, and the energy contract is
 the owner's own choice (compare feed-in terms after 2027-01-01), so those are not installer questions.
+
+**Home battery: purchase criteria** (not all batteries can be controlled; check per model, brands change fast):
+- Local API without cloud requirement (Modbus TCP, MQTT or REST). Brands I know offer local control include
+  Victron, Huawei LUNA, Sungrow, SMA and Sessy; not verified recently.
+- Control needed for the goal (charge only on surplus or before an expected evening peak):
+  1. self-consumption (charge from solar surplus; usually default),
+  2. charge from grid at cheap hours, with a setpoint or time window (needs a dynamic contract),
+  3. hold or force discharge (save energy for the evening peak),
+  4. charge/discharge power setpoint in W, not only on/off.
+- Works with the chosen inverter (hybrid or AC-coupled) and fits the connection capacity.
+- Warranty stays valid with external control.
+- No mandatory supplier subscription that takes over control of the battery.
+- Limits: in winter the heat pump runs while solar yield is low, so shift loads (hot water, floor) rather than buffer;
+  a 7-11 kW EV charge empties a 5-10 kWh battery in about an hour, so shift the EV itself.
+- Peak forecasting in Home Assistant: Forecast.Solar, hourly prices, own usage profile (needs the battery to be locally controllable).
 
 ## 5. EV charger (later)
 
