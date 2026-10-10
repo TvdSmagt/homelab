@@ -71,6 +71,6 @@ compose.yaml          all services
 mosquitto/            broker config
 grott/                grott config + HA extension
 scripts/              helper scripts
-docs/                 device notes (Growatt datalogger, ...)
+docs/                 device notes and roadmap (docs/roadmap.md)
 data/                 runtime state (not committed)
 ```
