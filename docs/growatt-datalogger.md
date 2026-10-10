@@ -9,6 +9,7 @@
 | LAN address | `192.168.2.18` (MAC `ac:cf:23:eb:88:23`) |
 | Web UI | <http://192.168.2.18>, HTTP basic auth, factory default `admin` / `admin` |
 | Inverter link | UART 9600 baud, 8N1 |
+| Inverter serial | `6FZ463602F` (works with Grott `invtype = default`) |
 | Monitoring account | Registered through the installer (Zelfstroom) on Growatt's platform |
 
 Give it a fixed DHCP lease in the router so this documentation stays valid.
@@ -48,10 +49,10 @@ It buffers data and Grott forwards the backlog once it reconnects (`sendbuf = Tr
 ## Status
 
 - [ ] Fixed DHCP lease for the Pi (`192.168.2.26`) and the logger (`192.168.2.18`)
-- [ ] Logger server address changed to `192.168.2.26`
-- [ ] Data visible in `docker compose logs -f grott`, serial matches `YUZ0644211`
-- [ ] Growatt device appears in Home Assistant
-- [ ] Turn `verbose` off again in `grott/grott.ini`
+- [x] Logger server address changed to `192.168.2.26`
+- [x] Data visible in `docker compose logs -f grott`, serial matches `YUZ0644211`
+- [x] Growatt device appears in Home Assistant
+- [x] Turn `verbose` off again in `grott/grott.ini`
 - [ ] Change the logger's web UI password from the factory default
 
 ## Verifying
