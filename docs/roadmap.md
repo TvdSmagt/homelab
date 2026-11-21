@@ -17,6 +17,7 @@ Planned additions to the stack, as of 2026-10-10.
 - [ ] Change the Growatt logger's web UI password from the factory default.
 - [ ] Energy dashboard: solar production = **Generated energy (Total)** (`pvenergytotal`, AC output).
   Not *Generated PV energy (Total)* (`epvtotal`), which is DC input before inverter losses (~1.6%).
+- [ ] On 2027-01-01: set the Energy dashboard export price to the feed-in compensation (net metering ends).
 - [ ] Hide the unused *Phase 2/3 power* sensors (single-phase inverter).
 - [ ] Optional: configure Forecast.Solar (one entry per panel string: tilt, azimuth, Wp).
 
@@ -110,7 +111,8 @@ is planned there (EV charger later), so today's profile is only a baseline.
   (tilt, azimuth). Record the current system's kWp.
 - Net metering (salderen) ends 2027-01-01 in NL, which makes self-consumption worth more than export.
 
-**Dynamic contract what-if (later):** current supplier is Budget Energie (no API known, fixed tariffs go in
+**Dynamic contract what-if:** first version in `scripts/dynamic_compare.py` ([smart-meter.md](smart-meter.md#fixed-vs-dynamic-contract)); needs weeks of data.
+Original notes: current supplier is Budget Energie (no API known, fixed tariffs go in
 the config). To see what the same usage would have cost on a dynamic contract:
 - Prices: day-ahead market prices per hour (per quarter-hour since the market moved to 15 min; check),
   e.g. the Home Assistant `EnergyZero` or `Nord Pool` integration, or the EnergyZero / ENTSO-E API for

@@ -241,7 +241,7 @@ mapping = {
     "totworktime": {
         "name": "Working time",
         "device_class": "duration",
-        "unit_of_measurement": "hours",
+        "unit_of_measurement": "h",
         "value_template": "{{ value_json.totworktime| float / 7200 | round(2) }}",
     },
     "pvtemperature": {
@@ -521,7 +521,7 @@ def make_payload(conf: Conf, device: str, name: str, key: str, unit: str = None)
                 "value_template"
             ] = "{{{{ value_json.{key} | float / {divide} }}}}".format(
                 key=key,
-                divide=layout[key].get("divide"),
+                divide=layout[key].get("divide", "1"),
             )
 
     if "value_template" not in payload:

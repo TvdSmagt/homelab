@@ -38,3 +38,42 @@ stty -F /dev/ttyUSB0 115200 cs8 -parenb -cstopb raw -echo clocal && timeout 12 c
 
 If the cable is unplugged and plugged back in, run `docker compose restart homeassistant`: the device
 mapping is made when the container starts.
+
+## Energy dashboard and costs
+
+Configured 2026-11-21 (stored in `data/homeassistant/.storage/energy`, backup of the previous version next to it):
+
+| Source | Sensors | Price |
+|---|---|---|
+| Grid *Daltarief* | consumption / production tarif 1 | import and export EUR 0.27695/kWh |
+| Grid *Piektarief* | consumption / production tarif 2 | import and export EUR 0.27695/kWh |
+| Grid power (live) | on *Daltarief*, two sensors: *Power consumption* minus *Power production* | |
+| Gas | *Gas consumption* | EUR 1.51574/m3 |
+
+Tariffs: Budget Energie, fixed, incl. energy tax and VAT (2026). Same price for both tariffs.
+Feed-in compensation EUR 0.01/kWh, supply costs EUR 6.99/month each for electricity and gas.
+
+- **Export price = import price** because net metering (salderen) applies until 2026-12-31.
+  **On 2027-01-01 change the export price of both grid sources to the feed-in compensation**
+  (EUR 0.01, or whatever Budget Energie charges/pays by then).
+- The dashboard only shows per-kWh/m3 costs. Fixed costs (supply costs, grid operator costs, energy tax rebate)
+  are not included: Home Assistant has no setting for them (the `cost_adjustment_day` field in the storage file
+  is not used anywhere).
+- Only add one power sensor per grid; the live power sensor HA generates for the two-sensor setup is
+  `sensor.energy_grid_electricity_meter_power_consumption_electricity_meter_power_production_net_power`.
+
+## Fixed vs dynamic contract
+
+[`scripts/dynamic_compare.py`](../scripts/dynamic_compare.py) takes the measured hourly import, export and gas
+from the Home Assistant statistics and the day-ahead prices from the public EnergyZero API (market prices
+excl. VAT, hourly), and prints per month what the fixed contract and a dynamic contract would have cost, under
+2026 rules (net metering) and 2027 rules (no net metering):
+
+```sh
+docker exec -i homeassistant python3 - < scripts/dynamic_compare.py
+docker exec -i homeassistant python3 - --since 2026-12-01 < scripts/dynamic_compare.py
+```
+
+The dynamic markup, export fee and monthly fee at the top of the script are **assumptions**; replace them with a
+real offer before deciding. Meaningful only after a few weeks of data, and ideally a full year (summer and winter).
+Hourly statistics are kept forever, so the comparison can be rerun at any time.
