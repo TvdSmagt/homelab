@@ -1,0 +1,83 @@
+# Ambient home screen on the Nest Hub in the dining room (media_player.eetkamer_display).
+# Dashboard: homeassistant/dashboards/nest_hub.yaml. Docs: docs/nest-display.md.
+
+template:
+  - sensor:
+      # Grid import/export as one counter each (tariff 1 + 2), so the dashboard can show "today" with
+      # a statistic card. total_increasing, so the recorder keeps long-term statistics.
+      - name: Electricity import total
+        unique_id: electricity_import_total
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {{ (states('sensor.electricity_meter_energy_consumption_tarif_1') | float
+              + states('sensor.electricity_meter_energy_consumption_tarif_2') | float) | round(3) }}
+        availability: >-
+          {{ has_value('sensor.electricity_meter_energy_consumption_tarif_1')
+             and has_value('sensor.electricity_meter_energy_consumption_tarif_2') }}
+      - name: Electricity export total
+        unique_id: electricity_export_total
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {{ (states('sensor.electricity_meter_energy_production_tarif_1') | float
+              + states('sensor.electricity_meter_energy_production_tarif_2') | float) | round(3) }}
+        availability: >-
+          {{ has_value('sensor.electricity_meter_energy_production_tarif_1')
+             and has_value('sensor.electricity_meter_energy_production_tarif_2') }}
+
+      # What the house uses right now: solar (Grott, W, every ~5 min) + grid import - export (P1, kW, every 10 s).
+      # Grott goes unavailable at night, which counts as 0 W solar.
+      - name: House power
+        unique_id: house_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set solar = states('sensor.6fz463602f_pv_output_actual') | float(0) %}
+          {% set grid = (states('sensor.electricity_meter_power_consumption') | float(0)
+                         - states('sensor.electricity_meter_power_production') | float(0)) * 1000 %}
+          {{ [solar + grid, 0] | max | round(0) }}
+        availability: "{{ has_value('sensor.electricity_meter_power_consumption') }}"
+
+      # Forecast.Solar has one entry per panel string; this is the sum for today.
+      - name: Solar forecast today
+        unique_id: solar_forecast_today
+        unit_of_measurement: kWh
+        device_class: energy
+        state: >-
+          {{ (states('sensor.energy_production_today') | float(0)
+              + states('sensor.energy_production_today_2') | float(0)) | round(1) }}
+        availability: "{{ has_value('sensor.energy_production_today') }}"
+
+automation:
+  # The Nest Hub drops the cast after "Hey Google", a timer, or when other media plays. Put the
+  # dashboard back every 5 minutes during the day, unless something else is playing on it.
+  - id: nest_hub_show_dashboard
+    alias: Nest Hub - show home dashboard
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: /5
+    conditions:
+      - condition: time
+        after: "06:30:00"
+        before: "23:00:00"
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: media_player.eetkamer_display
+            state: [playing, paused, buffering, unavailable]
+      # A078F6B0 is the Home Assistant Cast receiver app: already showing a dashboard.
+      - condition: template
+        value_template: "{{ state_attr('media_player.eetkamer_display', 'app_id') != 'A078F6B0' }}"
+    actions:
+      - action: cast.show_lovelace_view
+        data:
+          entity_id: media_player.eetkamer_display
+          dashboard_path: nest-hub
+          view_path: thuis

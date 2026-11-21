@@ -1,0 +1,232 @@
+# Ambient home screen for the Nest Hub (1024x600, touch), cast by the automation in
+# packages/nest_display.yaml. A panel view with one 3-column grid, so the layout does not depend
+# on Home Assistant's responsive breakpoints. Docs: docs/nest-display.md.
+title: Nest Hub
+views:
+  - title: Thuis
+    path: thuis
+    type: panel
+    cards:
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          # ── Column 1: time and weather ─────────────────────────────────────────────
+          - type: vertical-stack
+            cards:
+              - type: clock
+                clock_size: large
+              - type: weather-forecast
+                entity: weather.forecast_home
+                show_current: true
+                show_forecast: true
+                forecast_type: hourly
+              - type: grid
+                columns: 2
+                square: false
+                cards:
+                  - type: tile
+                    entity: sensor.koekelberg25_outdoor_temperature
+                    name: Buiten (Tado)
+                  - type: tile
+                    entity: sensor.sun_next_setting
+                    name: Zon onder
+                    icon: mdi:weather-sunset-down
+
+          # ── Column 2: energy ───────────────────────────────────────────────────────
+          - type: vertical-stack
+            cards:
+              - type: grid
+                columns: 3
+                square: false
+                cards:
+                  - type: tile
+                    entity: sensor.6fz463602f_pv_output_actual
+                    name: Zon
+                    icon: mdi:solar-power-variant
+                    color: amber
+                    vertical: true
+                  - type: tile
+                    entity: sensor.house_power
+                    name: Huis
+                    icon: mdi:home-lightning-bolt
+                    color: blue
+                    vertical: true
+                  - type: tile
+                    entity: sensor.energy_grid_electricity_meter_power_consumption_electricity_meter_power_production_net_power
+                    name: Net
+                    icon: mdi:transmission-tower
+                    color: purple
+                    vertical: true
+              # Today's hourly dynamic price as a bar line, the current hour marked, and the cheapest
+              # 3-hour slot from now (today or tomorrow, once tomorrow's prices are out around 14:00).
+              - type: markdown
+                content: >-
+                  {%- set ns = namespace(rows=[], line='', mark='', best=none, avg=99) -%}
+                  {%- for p in state_attr('sensor.energyzero_electricity_prices', 'Prices') or [] -%}
+                    {%- set ns.rows = ns.rows + [{'t': as_timestamp(p.readingDate), 'p': (p.price + 0.020) * 1.21 + 0.11085}] -%}
+                  {%- endfor -%}
+                  {%- set start = as_timestamp(today_at()) -%}
+                  {%- set hour = as_timestamp(now().replace(minute=0, second=0, microsecond=0)) -%}
+                  {%- set today = ns.rows | selectattr('t', 'ge', start) | selectattr('t', 'lt', start + 86400) | list -%}
+                  {%- macro eur(x) -%}€ {{ ('%.2f' | format(x)) | replace('.', ',') }}{%- endmacro -%}
+                  {%- if today | count > 1 -%}
+                    {%- set lo = today | map(attribute='p') | min -%}
+                    {%- set hi = today | map(attribute='p') | max -%}
+                    {%- for r in today -%}
+                      {%- set ns.line = ns.line ~ '▁▂▃▄▅▆▇█'[(((r.p - lo) / ([hi - lo, 0.0001] | max)) * 7) | round(0) | int] -%}
+                      {%- set ns.mark = ns.mark ~ ('^' if r.t == hour else ' ') -%}
+                    {%- endfor -%}
+                    {%- set future = ns.rows | selectattr('t', 'ge', hour) | list -%}
+                    {%- for i in range(0, [future | count - 2, 0] | max) -%}
+                      {%- set a = (future[i].p + future[i + 1].p + future[i + 2].p) / 3 -%}
+                      {%- if a < ns.avg -%}{%- set ns.avg = a -%}{%- set ns.best = future[i].t -%}{%- endif -%}
+                    {%- endfor %}
+                  **Stroomprijs nu {{ eur(states('sensor.dynamic_electricity_price') | float(0)) }}**/kWh
+                  dynamisch · vast {{ eur(0.27695) }}
+
+                  ```
+                  {{ ns.line }}
+                  {{ ns.mark }}
+                  0     6     12    18
+                  ```
+                  {{ eur(lo) }} – {{ eur(hi) }} vandaag
+                  {%- if ns.best is not none %}
+
+                  Goedkoopste 3 uur: **{{ 'morgen ' if ns.best >= start + 86400 else '' }}{{
+                  ns.best | timestamp_custom('%H:%M') }}–{{ (ns.best + 3 * 3600) | timestamp_custom('%H:%M') }}**,
+                  gem. {{ eur(ns.avg) }}
+                  {%- endif -%}
+                  {%- else -%}
+                  Nog geen prijzen van EnergyZero.
+                  {%- endif -%}
+              - type: grid
+                columns: 2
+                square: false
+                cards:
+                  - type: tile
+                    entity: sensor.6fz463602f_generated_energy_today
+                    name: Zon vandaag
+                    icon: mdi:solar-power-variant
+                    color: amber
+                  - type: tile
+                    entity: sensor.solar_forecast_today
+                    name: Zon verwacht
+                    icon: mdi:weather-sunny-alert
+                    color: amber
+                  - type: statistic
+                    entity: sensor.electricity_import_total
+                    name: Van het net
+                    icon: mdi:transmission-tower-import
+                    period:
+                      calendar:
+                        period: day
+                    stat_type: change
+                  - type: statistic
+                    entity: sensor.gas_meter_gas_consumption
+                    name: Gas
+                    icon: mdi:fire
+                    period:
+                      calendar:
+                        period: day
+                    stat_type: change
+                  - type: statistic
+                    entity: sensor.fixed_contract_total_cost
+                    name: Kosten vast
+                    icon: mdi:cash
+                    period:
+                      calendar:
+                        period: day
+                    stat_type: change
+                  - type: statistic
+                    entity: sensor.dynamic_contract_total_cost
+                    name: Kosten dynamisch
+                    icon: mdi:cash-clock
+                    period:
+                      calendar:
+                        period: day
+                    stat_type: change
+
+          # ── Column 3: climate and lights (tap to control) ─────────────────────────
+          - type: vertical-stack
+            cards:
+              - type: tile
+                entity: climate.woonkamer_woonkamer
+                name: Woonkamer
+                state_content: [current_temperature, hvac_action]
+                features:
+                  - type: target-temperature
+              - type: grid
+                columns: 2
+                square: false
+                cards:
+                  - type: tile
+                    entity: climate.beneden_beneden
+                    name: Beneden
+                    state_content: current_temperature
+                  - type: tile
+                    entity: climate.bibliotheek_bibliotheek
+                    name: Bibliotheek
+                    state_content: current_temperature
+                  - type: tile
+                    entity: climate.kleine_kamer_kleine_kamer
+                    name: Kleine kamer
+                    state_content: current_temperature
+                  - type: tile
+                    entity: water_heater.warm_water_warm_water
+                    name: Warm water
+                  - type: tile
+                    entity: light.woonkamer_woonkamer
+                    name: Woonkamer
+                    tap_action:
+                      action: toggle
+                  - type: tile
+                    entity: light.keuken_keuken
+                    name: Keuken
+                    tap_action:
+                      action: toggle
+                  - type: tile
+                    entity: light.eetkamer_eetkamer
+                    name: Eetkamer
+                    tap_action:
+                      action: toggle
+                  - type: tile
+                    entity: light.bibliotheek_bibliotheek
+                    name: Bibliotheek
+                    tap_action:
+                      action: toggle
+              - type: grid
+                columns: 4
+                square: false
+                cards:
+                  - type: button
+                    entity: scene.beneden_relax
+                    name: Relax
+                    icon: mdi:sofa
+                    show_state: false
+                    tap_action:
+                      action: toggle
+                  - type: button
+                    entity: scene.beneden_dimmed
+                    name: Gedimd
+                    icon: mdi:weather-night
+                    show_state: false
+                    tap_action:
+                      action: toggle
+                  - type: button
+                    entity: scene.beneden_bright
+                    name: Fel
+                    icon: mdi:white-balance-sunny
+                    show_state: false
+                    tap_action:
+                      action: toggle
+                  - type: button
+                    entity: light.beneden
+                    name: Uit
+                    icon: mdi:power
+                    show_state: false
+                    tap_action:
+                      action: perform-action
+                      perform_action: light.turn_off
+                      target:
+                        entity_id: light.beneden

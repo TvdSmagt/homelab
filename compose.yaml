@@ -97,3 +97,20 @@ services:
     environment:
       - TZ=${TZ}
       - PRIMARY_INTERFACE=eth0
+
+  # HTTPS reverse proxy for Home Assistant (required by Home Assistant Cast), see docs/https.md.
+  # Host network: listens on 443 (and 80 for redirects), proxies to Home Assistant on localhost:8123.
+  caddy:
+    build: ./caddy
+    image: homelab-caddy:2.10.2-duckdns
+    container_name: caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    environment:
+      - TZ=${TZ}
+      - HA_DOMAIN=${HA_DOMAIN}
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}

@@ -9,6 +9,7 @@ Home management stack for `home-pi` (Raspberry Pi, Debian 13, arm64), run with D
 | `homeassistant` | Home Assistant (host network), P1 smart meter cable on `/dev/ttyUSB0` | 8123 |
 | `otbr` | OpenThread Border Router on the ZBT-2 (host network) | 8081 (REST), 8083 (web) |
 | `matter-server` | Matter server for Home Assistant (host network) | 5580 |
+| `caddy` | HTTPS reverse proxy for Home Assistant, DuckDNS + Let's Encrypt ([docs/https.md](docs/https.md)) | 443 |
 
 ```
 Growatt inverter ── ShineWiFi/LAN ──► grott:5279 ──► server.growatt.com:5279   (ShinePhone keeps working)
@@ -65,6 +66,16 @@ In that case set `ip = 47.91.67.66` (the real Growatt IP) under `[Growatt]` in `
 - `grott/grott_ha.py` is the Home Assistant extension vendored from
   [johanmeijer/grott](https://github.com/johanmeijer/grott/tree/master/examples/Home%20Assistent).
 
+## HTTPS (DuckDNS)
+
+`https://tijs-homelab.duckdns.org` → Caddy on the Pi → Home Assistant; needed for casting to the Nest Hub.
+The name only resolves to the Pi's LAN IP, nothing is opened to the internet. Details: [docs/https.md](docs/https.md).
+
+- **DuckDNS account:** signed in at <https://www.duckdns.org> with **Google (the household Gmail account)**.
+  That account owns the subdomain and the token; protect it with 2-step verification.
+- Token and domain are in `.env` (`DUCKDNS_TOKEN`, `HA_DOMAIN`). If the token leaks, regenerate it on the DuckDNS page
+  and update `.env`, then `docker compose up -d caddy`.
+
 ## Backup
 
 `data/matter-server` (Matter fabric) and `data/otbr` (Thread network key) cannot be recreated: losing them means
@@ -98,6 +109,6 @@ mosquitto/            broker config
 grott/                grott config + HA extension
 homeassistant/        HA packages, jinja macros, YAML dashboards (mounted into the container)
 scripts/              helper scripts
-docs/                 device notes (smart-meter.md, matter-thread.md, ...) and roadmap.md
+docs/                 device notes (smart-meter.md, matter-thread.md, nest-display.md, ...) and roadmap.md
 data/                 runtime state (not committed)
 ```
