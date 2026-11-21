@@ -43,6 +43,10 @@ services:
       - mosquitto
     volumes:
       - ./data/homeassistant:/config
+      # Versioned config from this repo (fixed vs dynamic contract tracking, see docs/smart-meter.md)
+      - ./homeassistant/packages:/config/packages:ro
+      - ./homeassistant/custom_templates:/config/custom_templates:ro
+      - ./homeassistant/dashboards:/config/dashboards:ro
       - /etc/localtime:/etc/localtime:ro
       - /run/dbus:/run/dbus:ro
     devices:

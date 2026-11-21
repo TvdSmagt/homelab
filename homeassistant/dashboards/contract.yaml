@@ -1,0 +1,60 @@
+# "Contract" dashboard: fixed (Budget Energie) vs dynamic contract. See packages/energy_contract.yaml.
+title: Contract
+views:
+  - title: Fixed vs dynamic
+    path: compare
+    cards:
+      - type: markdown
+        content: >-
+          Measured usage priced under both contracts, incl. VAT and supply costs, excl. grid operator costs
+          and the energy tax rebate (the same for both). The dynamic markups and fees are **assumptions**
+          (see `homeassistant/packages/energy_contract.yaml`). Net metering is applied until 2026-12-31.
+      - type: statistics-graph
+        title: Cost per month
+        chart_type: bar
+        period: month
+        days_to_show: 365
+        stat_types: [change]
+        entities:
+          - entity: sensor.fixed_contract_total_cost
+            name: Fixed
+          - entity: sensor.dynamic_contract_total_cost
+            name: Dynamic
+      - type: statistics-graph
+        title: Cost per day
+        chart_type: bar
+        period: day
+        days_to_show: 31
+        stat_types: [change]
+        entities:
+          - entity: sensor.fixed_contract_total_cost
+            name: Fixed
+          - entity: sensor.dynamic_contract_total_cost
+            name: Dynamic
+      - type: entities
+        title: Totals since start
+        entities:
+          - entity: sensor.fixed_contract_total_cost
+            name: Fixed, total
+          - entity: sensor.dynamic_contract_total_cost
+            name: Dynamic, total
+          - type: section
+            label: Fixed contract
+          - sensor.fixed_contract_import_cost
+          - sensor.fixed_contract_export_credit
+          - sensor.fixed_contract_gas_cost
+          - sensor.fixed_contract_supply_costs
+          - type: section
+            label: Dynamic contract
+          - sensor.dynamic_contract_import_cost
+          - sensor.dynamic_contract_export_credit
+          - sensor.dynamic_contract_gas_cost
+          - sensor.dynamic_contract_supply_costs
+      - type: history-graph
+        title: Dynamic prices (incl. tax and VAT)
+        hours_to_show: 48
+        entities:
+          - entity: sensor.dynamic_electricity_price
+            name: Electricity EUR/kWh
+          - entity: sensor.dynamic_gas_price
+            name: Gas EUR/m³

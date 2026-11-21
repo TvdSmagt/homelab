@@ -64,6 +64,27 @@ Feed-in compensation EUR 0.01/kWh, supply costs EUR 6.99/month each for electric
 
 ## Fixed vs dynamic contract
 
+### Live, in Home Assistant
+
+[`homeassistant/packages/energy_contract.yaml`](../homeassistant/packages/energy_contract.yaml) (mounted into the
+container with the jinja macros and the dashboard; registered in `configuration.yaml` under `homeassistant: packages:`
+and `lovelace: dashboards:`):
+
+- **Prices:** REST sensors fetch day-ahead prices (yesterday to tomorrow) from the public EnergyZero API every
+  15 minutes. *Electricity/Gas market price* = current hour, excl. VAT; *Dynamic electricity/gas price* = all-in.
+- **Cost counters:** on every meter update, usage since the previous reading x the current price, for both
+  contracts: import cost, export credit, gas cost, supply costs (per hour), and a *total cost* per contract.
+  They are `monetary`/`total` sensors, so the recorder keeps hourly long-term statistics of them forever,
+  in the same database as the meter readings. Counting started 2026-11-21.
+- **Net metering:** until 2026-12-31 export earns the import price (fixed) or market price + energy tax (dynamic);
+  from 2027-01-01 the counters switch to EUR 0.01 (fixed) and market price (dynamic) automatically.
+- **Dashboard:** *Contract* in the sidebar, fixed vs dynamic per month and per day.
+- The dynamic markups and fees in the package are **assumptions**; replace them with a real offer.
+  Changing a price only affects usage from then on.
+- Usage while Home Assistant is down is charged at the first price after the restart.
+
+### Afterwards, from the statistics
+
 [`scripts/dynamic_compare.py`](../scripts/dynamic_compare.py) takes the measured hourly import, export and gas
 from the Home Assistant statistics and the day-ahead prices from the public EnergyZero API (market prices
 excl. VAT, hourly), and prints per month what the fixed contract and a dynamic contract would have cost, under

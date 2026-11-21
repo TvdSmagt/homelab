@@ -96,6 +96,7 @@ compose.yaml          all services
 .env                  secrets (not committed; copy from .env.example)
 mosquitto/            broker config
 grott/                grott config + HA extension
+homeassistant/        HA packages, jinja macros, YAML dashboards (mounted into the container)
 scripts/              helper scripts
 docs/                 device notes (smart-meter.md, matter-thread.md, ...) and roadmap.md
 data/                 runtime state (not committed)

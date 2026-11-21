@@ -1,0 +1,214 @@
+# Fixed vs dynamic energy contract, tracked live from the P1 meter.
+# Docs: docs/smart-meter.md (section "Fixed vs dynamic contract").
+#
+# All prices EUR incl. 21% VAT unless noted. The dynamic markups and fees are ASSUMPTIONS:
+# replace them with a real offer. Grid operator costs and the energy tax rebate are the same
+# for both contracts and are left out.
+#
+#   Fixed (Budget Energie, 2026):   electricity 0.27695/kWh, gas 1.51574/m3, feed-in 0.01/kWh,
+#                                   supply costs 6.99 + 6.99 per month
+#   Dynamic (assumed):              (market + 0.020) x 1.21 + energy tax per kWh,
+#                                   (market + 0.050) x 1.21 + energy tax per m3,
+#                                   export at market x 1.21, supply costs 5.99 + 5.99 per month
+#   Energy tax 2026 incl. VAT:      0.11085/kWh, 0.72680/m3
+#   Net metering (salderen) until 2026-12-31: export earns the import price (fixed) or the market
+#   price plus energy tax (dynamic). From 2027-01-01 this switches automatically.
+
+# Day-ahead market prices (EUR excl. VAT, per hour), yesterday to tomorrow, from the public EnergyZero API.
+rest:
+  - resource_template: >-
+      https://api.energyzero.nl/v1/energyprices?fromDate={{ (as_timestamp(today_at()) - 86400)
+      | timestamp_custom('%Y-%m-%dT%H:%M:%S.000Z', false) }}&tillDate={{ (as_timestamp(today_at()) + 2 * 86400 - 1)
+      | timestamp_custom('%Y-%m-%dT%H:%M:%S.000Z', false) }}&interval=4&usageType=1&inclBtw=false
+    scan_interval: 900
+    sensor:
+      - name: EnergyZero electricity prices
+        unique_id: energyzero_electricity_prices
+        value_template: "{{ value_json.Prices | count }}"
+        json_attributes: [Prices]
+  - resource_template: >-
+      https://api.energyzero.nl/v1/energyprices?fromDate={{ (as_timestamp(today_at()) - 86400)
+      | timestamp_custom('%Y-%m-%dT%H:%M:%S.000Z', false) }}&tillDate={{ (as_timestamp(today_at()) + 2 * 86400 - 1)
+      | timestamp_custom('%Y-%m-%dT%H:%M:%S.000Z', false) }}&interval=4&usageType=3&inclBtw=false
+    scan_interval: 900
+    sensor:
+      - name: EnergyZero gas prices
+        unique_id: energyzero_gas_prices
+        value_template: "{{ value_json.Prices | count }}"
+        json_attributes: [Prices]
+
+template:
+  # Prices for the current hour
+  - sensor:
+      - name: Electricity market price
+        unique_id: electricity_market_price
+        unit_of_measurement: EUR/kWh
+        state_class: measurement
+        state: >-
+          {% from 'energy_contract.jinja' import hour_price %}{{ hour_price('sensor.energyzero_electricity_prices') }}
+        availability: >-
+          {% from 'energy_contract.jinja' import hour_price %}{{ hour_price('sensor.energyzero_electricity_prices') != 'none' }}
+      - name: Gas market price
+        unique_id: gas_market_price
+        unit_of_measurement: EUR/m³
+        state_class: measurement
+        state: >-
+          {% from 'energy_contract.jinja' import hour_price %}{{ hour_price('sensor.energyzero_gas_prices') }}
+        availability: >-
+          {% from 'energy_contract.jinja' import hour_price %}{{ hour_price('sensor.energyzero_gas_prices') != 'none' }}
+      - name: Dynamic electricity price
+        unique_id: dynamic_electricity_price
+        unit_of_measurement: EUR/kWh
+        state_class: measurement
+        state: "{{ ((states('sensor.electricity_market_price') | float + 0.020) * 1.21 + 0.11085) | round(5) }}"
+        availability: "{{ has_value('sensor.electricity_market_price') }}"
+      - name: Dynamic gas price
+        unique_id: dynamic_gas_price
+        unit_of_measurement: EUR/m³
+        state_class: measurement
+        state: "{{ ((states('sensor.gas_market_price') | float + 0.050) * 1.21 + 0.72680) | round(5) }}"
+        availability: "{{ has_value('sensor.gas_market_price') }}"
+
+  # Electricity import (tariff 1 + 2)
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.electricity_meter_energy_consumption_tarif_1
+          - sensor.electricity_meter_energy_consumption_tarif_2
+    variables:
+      reading: >-
+        {% set a = states('sensor.electricity_meter_energy_consumption_tarif_1') | float(none) %}
+        {% set b = states('sensor.electricity_meter_energy_consumption_tarif_2') | float(none) %}
+        {{ a + b if a is not none and b is not none else none }}
+    sensor:
+      - name: Fixed contract import cost
+        unique_id: contract_fixed_import_cost
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {% from 'energy_contract.jinja' import cost_state %}{{ cost_state(this, reading, 0.27695) }}
+        attributes:
+          last_reading: >-
+            {% from 'energy_contract.jinja' import cost_last_reading %}{{ cost_last_reading(this, reading, 0.27695) }}
+      - name: Dynamic contract import cost
+        unique_id: contract_dynamic_import_cost
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {% from 'energy_contract.jinja' import cost_state %}
+          {{ cost_state(this, reading, states('sensor.dynamic_electricity_price') | float(none)) }}
+        attributes:
+          last_reading: >-
+            {% from 'energy_contract.jinja' import cost_last_reading %}
+            {{ cost_last_reading(this, reading, states('sensor.dynamic_electricity_price') | float(none)) }}
+
+  # Electricity export (tariff 1 + 2); credits, so they count down from the cost
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.electricity_meter_energy_production_tarif_1
+          - sensor.electricity_meter_energy_production_tarif_2
+    variables:
+      reading: >-
+        {% set a = states('sensor.electricity_meter_energy_production_tarif_1') | float(none) %}
+        {% set b = states('sensor.electricity_meter_energy_production_tarif_2') | float(none) %}
+        {{ a + b if a is not none and b is not none else none }}
+      net_metering: "{{ now() < as_datetime('2027-01-01T00:00:00+01:00') }}"
+      fixed_price: "{{ 0.27695 if net_metering else 0.01 }}"
+      dynamic_price: >-
+        {% set m = states('sensor.electricity_market_price') | float(none) %}
+        {{ none if m is none else m * 1.21 + (0.11085 if net_metering else 0) }}
+    sensor:
+      - name: Fixed contract export credit
+        unique_id: contract_fixed_export_credit
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {% from 'energy_contract.jinja' import cost_state %}{{ cost_state(this, reading, fixed_price | float) }}
+        attributes:
+          last_reading: >-
+            {% from 'energy_contract.jinja' import cost_last_reading %}{{ cost_last_reading(this, reading, fixed_price | float) }}
+      - name: Dynamic contract export credit
+        unique_id: contract_dynamic_export_credit
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {% from 'energy_contract.jinja' import cost_state %}{{ cost_state(this, reading, dynamic_price | float(none)) }}
+        attributes:
+          last_reading: >-
+            {% from 'energy_contract.jinja' import cost_last_reading %}{{ cost_last_reading(this, reading, dynamic_price | float(none)) }}
+
+  # Gas
+  - trigger:
+      - trigger: state
+        entity_id: sensor.gas_meter_gas_consumption
+    variables:
+      reading: "{{ states('sensor.gas_meter_gas_consumption') | float(none) }}"
+    sensor:
+      - name: Fixed contract gas cost
+        unique_id: contract_fixed_gas_cost
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {% from 'energy_contract.jinja' import cost_state %}{{ cost_state(this, reading, 1.51574) }}
+        attributes:
+          last_reading: >-
+            {% from 'energy_contract.jinja' import cost_last_reading %}{{ cost_last_reading(this, reading, 1.51574) }}
+      - name: Dynamic contract gas cost
+        unique_id: contract_dynamic_gas_cost
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {% from 'energy_contract.jinja' import cost_state %}
+          {{ cost_state(this, reading, states('sensor.dynamic_gas_price') | float(none)) }}
+        attributes:
+          last_reading: >-
+            {% from 'energy_contract.jinja' import cost_last_reading %}
+            {{ cost_last_reading(this, reading, states('sensor.dynamic_gas_price') | float(none)) }}
+
+  # Monthly supply costs, charged per hour (x 12 / 8760)
+  - trigger:
+      - trigger: time_pattern
+        minutes: 0
+    sensor:
+      - name: Fixed contract supply costs
+        unique_id: contract_fixed_supply_costs
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: "{{ (this.state | float(0) + (6.99 + 6.99) * 12 / 8760) | round(5) }}"
+      - name: Dynamic contract supply costs
+        unique_id: contract_dynamic_supply_costs
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: "{{ (this.state | float(0) + (5.99 + 5.99) * 12 / 8760) | round(5) }}"
+
+  # Totals (counted from 2026-11-21, compare per day/month in the "Contract" dashboard)
+  - sensor:
+      - name: Fixed contract total cost
+        unique_id: contract_fixed_total_cost
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {{ (states('sensor.fixed_contract_import_cost') | float(0)
+              - states('sensor.fixed_contract_export_credit') | float(0)
+              + states('sensor.fixed_contract_gas_cost') | float(0)
+              + states('sensor.fixed_contract_supply_costs') | float(0)) | round(5) }}
+      - name: Dynamic contract total cost
+        unique_id: contract_dynamic_total_cost
+        unit_of_measurement: EUR
+        device_class: monetary
+        state_class: total
+        state: >-
+          {{ (states('sensor.dynamic_contract_import_cost') | float(0)
+              - states('sensor.dynamic_contract_export_credit') | float(0)
+              + states('sensor.dynamic_contract_gas_cost') | float(0)
+              + states('sensor.dynamic_contract_supply_costs') | float(0)) | round(5) }}

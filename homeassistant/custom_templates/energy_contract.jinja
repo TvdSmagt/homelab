@@ -1,0 +1,36 @@
+{#- Helpers for the cost counters in packages/energy_contract.yaml.
+
+    A counter keeps the meter reading it last charged for in the attribute `last_reading`.
+    On every meter update it adds (reading - last_reading) x price. When the price is unknown the
+    reading is not consumed, so that usage is charged later. Usage while Home Assistant is down is
+    charged at the first price after the restart. -#}
+
+{%- macro cost_state(this, reading, price) -%}
+{%- set base = this.state | float(0) -%}
+{%- set last = this.attributes.get('last_reading') -%}
+{%- if reading is not none and last is not none and price is not none and reading >= last | float -%}
+{{ (base + (reading - last | float) * price) | round(5) }}
+{%- else -%}
+{{ base }}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro cost_last_reading(this, reading, price) -%}
+{%- set last = this.attributes.get('last_reading') -%}
+{%- if reading is none -%}
+{{ last }}
+{%- elif last is none or price is not none or reading < last | float -%}
+{{ reading }}
+{%- else -%}
+{{ last }}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Price for the current hour from the `Prices` attribute of an EnergyZero REST sensor, or none. -#}
+{%- macro hour_price(entity_id) -%}
+{%- set hour = now().replace(minute=0, second=0, microsecond=0).timestamp()
+               | timestamp_custom('%Y-%m-%dT%H:%M:%SZ', false) -%}
+{%- set found = (state_attr(entity_id, 'Prices') or [])
+                | selectattr('readingDate', 'eq', hour) | map(attribute='price') | list -%}
+{{ found[0] if found else 'none' }}
+{%- endmacro -%}
