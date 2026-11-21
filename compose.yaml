@@ -47,6 +47,7 @@ services:
       - ./homeassistant/packages:/config/packages:ro
       - ./homeassistant/custom_templates:/config/custom_templates:ro
       - ./homeassistant/dashboards:/config/dashboards:ro
+      - ./homeassistant/www:/config/www:ro   # custom cards, served as /local/
       - /etc/localtime:/etc/localtime:ro
       - /run/dbus:/run/dbus:ro
     devices:

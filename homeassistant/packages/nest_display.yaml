@@ -1,6 +1,29 @@
 # Ambient home screen on the Nest Hub in the dining room (media_player.eetkamer_display).
 # Dashboard: homeassistant/dashboards/nest_hub.yaml. Docs: docs/nest-display.md.
 
+# 2-hour rain forecast (Buienradar, based on KNMI radar), every 5 min for the home location (~1 km).
+# Raw values 0-255 per 5 minutes; mm/h = 10^((value - 109) / 32). State: "HH:MM|mm/h,mm/h,..." (24 steps),
+# drawn by custom:homelab-rain-card.
+rest:
+  - resource_template: >-
+      https://gpsgadget.buienradar.nl/data/raintext?lat={{ state_attr('zone.home', 'latitude') | round(2) }}&lon={{
+      state_attr('zone.home', 'longitude') | round(2) }}
+    scan_interval: 300
+    timeout: 15
+    sensor:
+      - name: Rain forecast
+        unique_id: rain_forecast_2h
+        icon: mdi:weather-pouring
+        value_template: >-
+          {%- set ns = namespace(v=[], t='') -%}
+          {%- for l in value.replace('\r', '').split('\n') if '|' in l -%}
+            {%- set p = l.split('|') -%}
+            {%- if ns.t == '' -%}{%- set ns.t = p[1] | trim -%}{%- endif -%}
+            {%- set i = p[0] | int(0) -%}
+            {%- set ns.v = ns.v + [((10 ** ((i - 109) / 32)) | round(1)) if i > 0 else 0] -%}
+          {%- endfor -%}
+          {{ ns.t ~ '|' ~ ns.v | join(',') if ns.t else none }}
+
 template:
   - sensor:
       # Grid import/export as one counter each (tariff 1 + 2), so the dashboard can show "today" with
@@ -51,10 +74,108 @@ template:
           {{ (states('sensor.energy_production_today') | float(0)
               + states('sensor.energy_production_today_2') | float(0)) | round(1) }}
         availability: "{{ has_value('sensor.energy_production_today') }}"
+      - name: Solar forecast tomorrow
+        unique_id: solar_forecast_tomorrow
+        unit_of_measurement: kWh
+        device_class: energy
+        state: >-
+          {{ (states('sensor.energy_production_tomorrow') | float(0)
+              + states('sensor.energy_production_tomorrow_2') | float(0)) | round(1) }}
+        availability: "{{ has_value('sensor.energy_production_tomorrow') }}"
+
+  # Energy score (custom card in homeassistant/www/)
+  - sensor:
+      # Share of today's own solar that the house used itself instead of exporting.
+      - name: Self consumption today
+        unique_id: self_consumption_today
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >-
+          {% set solar = states('sensor.solar_energy_today') | float(0) %}
+          {% set export = states('sensor.grid_export_today') | float(0) %}
+          {{ ([0, [100, (solar - export) / solar * 100] | min] | max) | round(0) }}
+        availability: "{{ states('sensor.solar_energy_today') | float(0) >= 0.1 }}"
+      # Share of today's usage that came from own solar.
+      - name: Self sufficiency today
+        unique_id: self_sufficiency_today
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >-
+          {% set own = [states('sensor.solar_energy_today') | float(0) - states('sensor.grid_export_today') | float(0), 0] | max %}
+          {% set imp = states('sensor.grid_import_today') | float(0) %}
+          {{ (own / (own + imp) * 100) | round(0) if own + imp > 0 else 0 }}
+        availability: "{{ has_value('sensor.grid_import_today') }}"
+      # How well grid import was timed: 50 = paid the average dynamic price of today's hours so far,
+      # 100 = everything at the cheapest hour, 0 = far above average. Uses the dynamic all-in price
+      # (packages/energy_contract.yaml), also while on the fixed contract.
+      - name: Price timing score today
+        unique_id: price_timing_score_today
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >-
+          {% set start = as_timestamp(today_at()) %}
+          {% set ts = as_timestamp(now()) %}
+          {% set ns = namespace(v=[]) %}
+          {% for p in state_attr('sensor.energyzero_electricity_prices', 'Prices') or [] %}
+            {% set t = as_timestamp(p.readingDate) %}
+            {% if start <= t <= ts %}{% set ns.v = ns.v + [(p.price + 0.020) * 1.21 + 0.11085] %}{% endif %}
+          {% endfor %}
+          {% set avg = ns.v | sum / ns.v | count %}
+          {% set paid = states('sensor.dynamic_import_cost_today') | float(0) / states('sensor.grid_import_today') | float(1) %}
+          {{ ([0, [100, 50 + 50 * (avg - paid) / ([avg - ns.v | min, 0.02] | max)] | min] | max) | round(0) }}
+        availability: >-
+          {{ states('sensor.grid_import_today') | float(0) >= 0.2
+             and (state_attr('sensor.energyzero_electricity_prices', 'Prices') or []) | count > 0 }}
+      # Energy score: average of self consumption and price timing (price timing alone without solar).
+      - name: Energy score today
+        unique_id: energy_score_today
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >-
+          {% set v = [states('sensor.self_consumption_today'), states('sensor.price_timing_score_today')]
+                     | reject('in', ['unknown', 'unavailable']) | map('float') | list %}
+          {{ (v | sum / v | count) | round(0) }}
+        availability: >-
+          {{ has_value('sensor.self_consumption_today') or has_value('sensor.price_timing_score_today') }}
+
+# ── Today's totals and the energy score (shown by the custom cards in homeassistant/www/) ──────────
+# Daily counters, reset at midnight. They started on 2026-11-21, so that day is partial.
+utility_meter:
+  solar_energy_today:
+    name: Solar energy today
+    unique_id: solar_energy_today
+    source: sensor.6fz463602f_generated_energy_total
+    cycle: daily
+  grid_import_today:
+    name: Grid import today
+    unique_id: grid_import_today
+    source: sensor.electricity_import_total
+    cycle: daily
+  grid_export_today:
+    name: Grid export today
+    unique_id: grid_export_today
+    source: sensor.electricity_export_total
+    cycle: daily
+  gas_today:
+    name: Gas today
+    unique_id: gas_today
+    source: sensor.gas_meter_gas_consumption
+    cycle: daily
+  fixed_cost_today:
+    name: Cost today
+    unique_id: fixed_cost_today
+    source: sensor.fixed_contract_total_cost
+    cycle: daily
+    net_consumption: true   # export credit makes the source go down
+  dynamic_import_cost_today:
+    name: Dynamic import cost today
+    unique_id: dynamic_import_cost_today
+    source: sensor.dynamic_contract_import_cost
+    cycle: daily
 
 automation:
   # The Nest Hub drops the cast after "Hey Google", a timer, or when other media plays. Put the
-  # dashboard back every 5 minutes during the day, unless something else is playing on it.
+  # dashboard back every 5 minutes between 07:00 and 22:30, unless something else is playing on it.
   - id: nest_hub_show_dashboard
     alias: Nest Hub - show home dashboard
     mode: single
@@ -65,8 +186,8 @@ automation:
         minutes: /5
     conditions:
       - condition: time
-        after: "06:30:00"
-        before: "23:00:00"
+        after: "07:00:00"
+        before: "22:30:00"
       - condition: not
         conditions:
           - condition: state
@@ -81,3 +202,76 @@ automation:
           entity_id: media_player.eetkamer_display
           dashboard_path: nest-hub
           view_path: thuis
+
+  # Self-heal for a pychromecast bug: after a network blip HA reconnects to the Nest and, from the socket
+  # thread, waits 30 s for an answer that this same thread should read. It times out, reconnects and
+  # sends "connect" again, every 30 s; each time the receiver logs in anew and briefly shows
+  # "Not connected". Reloading the cast integration drops that stuck controller; then cast once more.
+  # Needs `system_log: fire_event` (below).
+  - id: nest_hub_cast_reconnect_loop
+    alias: Nest Hub - fix cast reconnect loop
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: event
+        event_type: system_log_event
+        event_data:
+          name: pychromecast.controllers
+    conditions:
+      - condition: template
+        value_template: >-
+          {% set m = trigger.event.data.message %}
+          {{ '_connect_hass failed' in (m if m is string else m | join(' ')) }}
+    actions:
+      - action: homeassistant.reload_config_entry
+        target:
+          entity_id: media_player.eetkamer_display
+      - delay: "00:00:20"
+      - if:
+          - condition: time
+            after: "07:00:00"
+            before: "22:30:00"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: media_player.eetkamer_display
+                state: [playing, paused, buffering, unavailable]
+        then:
+          - action: cast.show_lovelace_view
+            data:
+              entity_id: media_player.eetkamer_display
+              dashboard_path: nest-hub
+              view_path: thuis
+      # Ignore the warnings still queued from the old loop.
+      - delay: "00:02:00"
+
+  # At 22:30 stop the dashboard (only when it is showing), so the Nest goes back to its own night screen.
+  - id: nest_hub_stop_dashboard
+    alias: Nest Hub - stop home dashboard
+    mode: single
+    triggers:
+      - trigger: time
+        at: "22:30:00"
+    conditions:
+      - condition: template
+        value_template: "{{ state_attr('media_player.eetkamer_display', 'app_id') == 'A078F6B0' }}"
+    actions:
+      - action: media_player.turn_off
+        target:
+          entity_id: media_player.eetkamer_display
+
+# Cast the dashboard right now, e.g. from a Home Assistant Companion app widget on the phone.
+script:
+  nest_hub_show_dashboard:
+    alias: "Nest Hub: toon dashboard"
+    icon: mdi:cast
+    sequence:
+      - action: cast.show_lovelace_view
+        data:
+          entity_id: media_player.eetkamer_display
+          dashboard_path: nest-hub
+          view_path: thuis
+
+# Fire system_log_event for warnings, used by nest_hub_cast_reconnect_loop.
+system_log:
+  fire_event: true
