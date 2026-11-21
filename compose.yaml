@@ -45,5 +45,51 @@ services:
       - ./data/homeassistant:/config
       - /etc/localtime:/etc/localtime:ro
       - /run/dbus:/run/dbus:ro
+    devices:
+      # P1 smart meter cable (FTDI, DSMR 4.2, 115200 8N1). In the DSMR integration use /dev/ttyUSB0.
+      - /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A1BSZKI8-if00-port0:/dev/ttyUSB0
     environment:
       - TZ=${TZ}
+
+  # OpenThread Border Router on the Home Assistant Connect ZBT-2 (OpenThread RCP firmware).
+  # Same code as the official Home Assistant OTBR add-on, packaged as a standalone container.
+  # REST API on :8081 for the Home Assistant "OpenThread Border Router" integration.
+  otbr:
+    image: ghcr.io/ownbee/hass-otbr-docker:v0.4.0
+    container_name: otbr
+    restart: unless-stopped
+    network_mode: host
+    privileged: true      # creates wpan0 and sets ip6tables/ipset rules on the host
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    devices:
+      - /dev/serial/by-id/usb-Nabu_Casa_ZBT-2_B81F3FD18AD8-if00:/dev/ttyACM0
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./data/otbr:/data/thread
+    environment:
+      - TZ=${TZ}
+      - DEVICE=/dev/ttyACM0
+      - BAUDRATE=460800
+      - FLOW_CONTROL=1
+      - BACKBONE_IF=eth0
+      - FIREWALL=1
+      - NAT64=1
+      - AUTOFLASH_FIRMWARE=0   # the ZBT-2 is flashed manually, see docs/matter-thread.md
+      - OTBR_REST_PORT=8081
+      - OTBR_WEB_PORT=8083
+      - OTBR_LOG_LEVEL=notice
+
+  # Matter server (matter.js; drop-in successor of python-matter-server). WebSocket on :5580,
+  # used by the Home Assistant Matter integration (ws://localhost:5580/ws).
+  matter-server:
+    image: ghcr.io/matter-js/matterjs-server:1.6.0
+    container_name: matter-server
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data/matter-server:/data
+    environment:
+      - TZ=${TZ}
+      - PRIMARY_INTERFACE=eth0

@@ -7,6 +7,9 @@ Planned additions to the stack, as of 2026-10-10.
 - Mosquitto, Grott, Home Assistant running ([README](../README.md)).
 - Growatt ShineLAN redirected to Grott; inverter shows up in Home Assistant
   ([growatt-datalogger.md](growatt-datalogger.md)).
+- 2026-11-21: P1 cable connected and passed to Home Assistant ([smart-meter.md](smart-meter.md)).
+  ZBT-2 flashed with Thread firmware; `otbr` and `matter-server` running ([matter-thread.md](matter-thread.md)).
+  Remaining steps: the Home Assistant integrations and IPv6 forwarding on the host (see those docs).
 
 ## Open housekeeping
 
@@ -28,7 +31,7 @@ block in the lower half of the meter. Do not open the large sealed terminal cove
 
 **Hardware:** USB P1 cable for DSMR 4/5 (RJ12 → USB, built-in FTDI converter), ~€15, long enough
 to reach the Pi. DSMR 4.0 does not power devices on the P1 port; the cable is powered over USB.
-Avoid the cheapest no-name cables. Status: being ordered.
+Avoid the cheapest no-name cables. Status: connected (DSMR 4.2 telegrams verified).
 
 **Setup steps (once plugged in):**
 1. Find the device under `/dev/serial/by-id/` and pass it through to the `homeassistant` service in `compose.yaml`.
@@ -50,7 +53,7 @@ otherwise add a Riemann sum helper on the power sensor).
 **Hardware:** Home Assistant Connect **ZBT-2** (Nabu Casa, EAN 860011789741), ~€50, run with
 Thread firmware. Not the ZWA-2 (that is Z-Wave only). One radio does Zigbee *or* Thread, not both;
 a second radio is needed if Zigbee devices are added later.
-Status: out of stock almost everywhere in NL; Robbshop/HAshop expect it mid-October 2026.
+Status: connected, Thread firmware flashed.
 
 **Placement:** in the meter cabinet (wooden door, fine for 2.4 GHz), on the included 1 m USB extension,
 away from the Pi's USB 3 ports and from the metal of the meter/fuse box, high and upright.
