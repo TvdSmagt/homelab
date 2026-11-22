@@ -2,13 +2,19 @@
 // (homeassistant/dashboards/nest_hub.yaml), no Home Assistant cards and no dependencies.
 // Designed at 1024 x 600 (the Nest Hub) and scaled to fit any other screen.
 //
+// A looping carousel of full-screen slides, each showing one subject in large type so it reads from across
+// the room. A bar at the bottom shows the time and has a button per slide; swipe left / right to step.
+// The carousel advances on its own every `rotate` seconds and pauses for `resume_after` seconds after a touch.
+//
 //   background   live sky: colour follows the real sun elevation, glow where the sun is, stars at night,
 //                drifting clouds by weather condition, falling rain when the radar says it rains now
-//   left         clock, weather now (animated icon, moon phase at night, wind in Bft), day arc with
-//                sunrise / sunset, rain next 2 hours (Buienradar / KNMI radar), solar harvest vs forecast
-//   centre       energy: animated solar / grid / house flow, energy score (tap for the breakdown),
-//                thin 12-hour graph of solar vs house power, today's totals
-//   right        all Tado rooms with - / + (debounced, Tado has API limits), lights, scenes
+//   Nu           big clock, weather now (animated icon, moon phase, wind in Bft), day arc, rain and solar summary
+//   Energie      animated solar / grid / house flow and the energy score with its two parts
+//   Vandaag      12-hour graph of solar vs house power and today's totals
+//   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
+//   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
+//                per hour (last 24 h) and per day (last 7 days) from the recorder's long-term statistics
+//   Lampen       lights and scenes
 //
 // On the Cast receiver (or with ?kiosk in the URL) it covers the whole screen and shifts a few pixels
 // every 5 minutes against burn-in. Served as /local/homelab-ambient-panel.js; bump ?v= in
@@ -30,6 +36,8 @@ const DEFAULTS = {
   import_today: 'sensor.grid_import_today',
   export_today: 'sensor.grid_export_today',
   gas_today: 'sensor.gas_today',
+  gas: 'sensor.gas_meter_gas_consumption', // meter reading (m³), its long-term statistics feed the gas graph
+  gas_price: 1.51574, // EUR per m³ incl. VAT, fixed contract (packages/energy_contract.yaml)
   cost_today: 'sensor.fixed_cost_today',
   forecast_today: 'sensor.solar_forecast_today',
   forecast_tomorrow: 'sensor.solar_forecast_tomorrow',
@@ -57,6 +65,11 @@ const DEFAULTS = {
   ],
   graph_hours: 12,
   temp_step: 0.5,
+  // carousel
+  start: 'nu', // slide shown first
+  rotate: 20, // seconds per slide, 0 = no auto-rotation
+  resume_after: 90, // seconds without a touch before the rotation continues
+  rotate_slides: ['nu', 'energie', 'vandaag', 'regen', 'klimaat'], // Lampen only by button or swipe
 };
 
 // ── Small helpers ───────────────────────────────────────────────────────────────────────────────
@@ -210,6 +223,18 @@ function rng(seed) {
   };
 }
 
+// ── Slides: order is the loop order; `ac` colours the active button ─────────────────────────────
+const SLIDES = [
+  { id: 'nu', name: 'Nu', icon: 'mdi:clock-outline', ac: '#ffd56b' },
+  { id: 'energie', name: 'Energie', icon: 'mdi:lightning-bolt', ac: '#3fd68f' },
+  { id: 'vandaag', name: 'Vandaag', icon: 'mdi:chart-areaspline', ac: '#5aaeff' },
+  { id: 'regen', name: 'Regen', icon: 'mdi:weather-pouring', ac: '#6fb8ff' },
+  { id: 'klimaat', name: 'Klimaat', icon: 'mdi:thermostat', ac: '#ff8a4c' },
+  { id: 'lampen', name: 'Lampen', icon: 'mdi:lightbulb-group', ac: '#ffc46b' },
+];
+const GW = 940; // graph viewBox
+const GH = 200;
+
 // ── Styles ──────────────────────────────────────────────────────────────────────────────────────
 const STYLE = `
 :host { display: block; position: relative; overflow: hidden; height: calc(100vh - var(--header-height, 56px));
@@ -217,7 +242,7 @@ const STYLE = `
   -webkit-tap-highlight-color: transparent; -webkit-font-smoothing: antialiased;
   font-family: Outfit, Roboto, 'Segoe UI', system-ui, sans-serif;
   --solar: #ffb938; --grid: #a98bff; --export: #3fd68f; --home: #5aaeff; --heat: #ff8a4c; --rain: #6fb8ff;
-  --text: #f4f6fb; --muted: rgba(232, 238, 255, .62); --faint: rgba(232, 238, 255, .13);
+  --text: #f4f6fb; --muted: rgba(232, 238, 255, .66); --faint: rgba(232, 238, 255, .13);
   --glass: rgba(7, 11, 26, .46); --edge: rgba(255, 255, 255, .09); --stars: 0; --clouds: 0; --cloudc: 200, 208, 224; }
 :host(.full) { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 9; }
 * { box-sizing: border-box; }
@@ -246,36 +271,67 @@ canvas.on { opacity: 1; }
 .veil { background: #000; opacity: 0; transition: opacity 60s; }
 
 /* stage: fixed 1024 x 600 design, scaled to the screen */
-.stage { position: absolute; left: 50%; top: 50%; width: ${W}px; height: ${H}px; padding: 16px;
-  display: grid; grid-template-columns: 270px 384px 314px; gap: 12px;
+.stage { position: absolute; left: 50%; top: 50%; width: ${W}px; height: ${H}px;
   transform: translate(-50%, -50%) translate(var(--sx, 0px), var(--sy, 0px)) scale(var(--k, 1));
   transition: transform 3s ease-in-out; }
-.col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
-.glass { background: var(--glass); border: 1px solid var(--edge); border-radius: 22px; position: relative; }
-.press { transition: transform .15s, background .3s; }
-.press:active { transform: scale(.95); }
-.label { font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.glass { background: var(--glass); border: 1px solid var(--edge); border-radius: 26px; position: relative; }
+.press { transition: transform .15s, background .4s, border-color .4s; }
+.press:active { transform: scale(.97); }
+.label { font-size: 15px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 
-/* clock */
-.clock { padding: 2px 6px 0; position: relative; }
-.greet { font-size: 15px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.greet .off { width: 8px; height: 8px; border-radius: 50%; background: #ff6b6b; display: none; }
+/* carousel */
+.slides { position: absolute; left: 0; top: 0; width: ${W}px; height: 512px; overflow: hidden; touch-action: none; }
+.slide { position: absolute; inset: 0; padding: 22px 24px 4px; display: flex; flex-direction: column; gap: 14px;
+  visibility: hidden; transform: translate3d(100%, 0, 0); will-change: transform;
+  transition: transform .65s cubic-bezier(.2, .8, .2, 1); }
+.slide.on { visibility: visible; }
+.shead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 0 6px; flex: none; }
+.shead h2 { margin: 0; font-size: 32px; font-weight: 300; letter-spacing: -.01em; }
+.shead > span { font-size: 19px; color: var(--muted); display: flex; align-items: center; gap: 14px; white-space: nowrap; }
+.shead ha-icon { --mdc-icon-size: 21px; margin-right: 4px; }
+
+/* bottom bar */
+.nav { position: absolute; left: 16px; right: 16px; bottom: 12px; height: 76px; display: flex; align-items: center;
+  gap: 6px; padding: 0 8px 0 20px; border-radius: 28px; background: rgba(7, 11, 26, .62); border: 1px solid var(--edge); }
+.ntime { font-size: 34px; font-weight: 300; font-variant-numeric: tabular-nums; min-width: 104px; letter-spacing: -.01em; }
+.nb { flex: 1; height: 62px; border-radius: 22px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 3px; color: var(--muted); position: relative; overflow: hidden;
+  transition: background .4s, color .4s, transform .15s; }
+.nb:active { transform: scale(.94); }
+.nb ha-icon { --mdc-icon-size: 27px; transition: color .4s; }
+.nb span { font-size: 15.5px; font-weight: 500; }
+.nb.on { background: rgba(255, 255, 255, .13); color: var(--text); }
+.nb.on ha-icon { color: var(--ac); }
+.nb::after { content: ''; position: absolute; left: 24%; right: 24%; bottom: 4px; height: 3px; border-radius: 2px;
+  background: var(--ac); opacity: 0; transform: scaleX(0); transform-origin: left; }
+.nb.on.run::after { opacity: .9; animation: prog var(--rot, 20s) linear forwards; }
+.nb.on.hold::after { opacity: .35; transform: scaleX(1); }
+@keyframes prog { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.bd { position: absolute; display: none; top: 7px; left: calc(50% + 9px); width: 11px; height: 11px; border-radius: 6px;
+  background: var(--bc, var(--ac)); box-shadow: 0 0 10px var(--bc, var(--ac)); font-style: normal; }
+.bd.dot { display: block; }
+.bd.n { display: block; width: auto; min-width: 21px; height: 21px; top: 2px; padding: 0 6px; border-radius: 11px;
+  font-size: 13px; font-weight: 600; line-height: 21px; text-align: center; color: #0b0f1e; box-shadow: none; }
+
+/* ── Nu ── */
+.nu { flex: 1; display: grid; grid-template-columns: 1fr 404px; gap: 20px; min-height: 0; }
+.nleft { display: flex; flex-direction: column; justify-content: center; padding-left: 8px; min-width: 0; }
+.greet { font-size: 24px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+.greet .off { width: 12px; height: 12px; border-radius: 50%; background: #ff6b6b; display: none; }
 .greet .off.on { display: inline-block; }
-.time { font-size: 98px; font-weight: 200; line-height: .92; letter-spacing: -.035em; margin-left: -4px;
-  font-variant-numeric: tabular-nums; text-shadow: 0 4px 30px rgba(0,0,0,.25); }
+.time { font-size: 176px; font-weight: 200; line-height: .9; letter-spacing: -.045em; margin-left: -8px;
+  font-variant-numeric: tabular-nums; text-shadow: 0 6px 40px rgba(0, 0, 0, .3); white-space: nowrap; }
 .time .c { animation: colon 2s ease-in-out infinite; }
 @keyframes colon { 50% { opacity: .3; } }
-.date { font-size: 18px; font-weight: 300; color: var(--muted); margin-top: 4px; }
-
-/* weather */
-.weather { padding: 12px 14px 8px; cursor: pointer; }
-.wrow { display: flex; align-items: center; gap: 10px; }
-.wicon { width: 66px; height: 66px; flex: none; margin: -6px -2px -6px -6px; }
+.date { font-size: 30px; font-weight: 300; color: var(--muted); margin-top: 12px; }
+.nweather { padding: 18px 22px 14px; display: flex; flex-direction: column; min-height: 0; }
+.wrow { display: flex; align-items: center; gap: 12px; }
+.wicon { width: 112px; height: 112px; flex: none; margin: -10px -4px -10px -10px; }
 .wicon svg { width: 100%; height: 100%; overflow: visible; }
-.temp { font-size: 38px; font-weight: 300; line-height: 1; }
-.cond { font-size: 14px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
-.wmeta { margin-left: auto; text-align: right; font-size: 12px; color: var(--muted); line-height: 1.55; white-space: nowrap; }
-.wmeta ha-icon { --mdc-icon-size: 14px; vertical-align: -2px; margin-right: 2px; opacity: .8; }
+.temp { font-size: 88px; font-weight: 200; line-height: 1; letter-spacing: -.03em; }
+.cond { font-size: 23px; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wmeta { display: flex; gap: 22px; font-size: 19px; color: var(--muted); margin-top: 6px; white-space: nowrap; }
+.wmeta ha-icon { --mdc-icon-size: 21px; vertical-align: -4px; margin-right: 5px; opacity: .85; }
 .sun circle { fill: #ffc94a; } .sun .halo { fill: rgba(255, 201, 74, .16); }
 .rays line { stroke: #ffc94a; stroke-width: 3; stroke-linecap: round; }
 .rays { animation: spin 50s linear infinite; }
@@ -294,65 +350,36 @@ canvas.on { opacity: 1; }
 .windl path { fill: none; stroke: #dfe6f2; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 50 14;
   animation: dash 3s linear infinite; }
 @keyframes dash { to { stroke-dashoffset: -64; } }
-.arc { margin-top: 6px; }
-.arc svg { display: block; width: 100%; height: 50px; overflow: visible; }
+.arc { margin-top: auto; }
+.arc svg { display: block; width: 100%; height: auto; overflow: visible; }
 .arc .hz { stroke: var(--faint); stroke-width: 1; }
-.arc .bg { fill: none; stroke: rgba(255, 255, 255, .16); stroke-width: 1.5; stroke-dasharray: 2 5; stroke-linecap: round; }
+.arc .bg { fill: none; stroke: rgba(255, 255, 255, .18); stroke-width: 1.5; stroke-dasharray: 2 5; stroke-linecap: round; }
 .arc .fg { fill: none; stroke: url(#arcg); stroke-width: 2.5; stroke-linecap: round; }
 .arc .dot { fill: #ffd56b; } .arc .glw { fill: rgba(255, 205, 90, .22); }
-.arcl { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
-.arcl ha-icon { --mdc-icon-size: 14px; vertical-align: -2px; margin-right: 2px; }
-
-/* rain */
-.rain { padding: 11px 14px 9px; flex: 1; display: flex; flex-direction: column; }
-.rhead { display: flex; align-items: center; gap: 9px; }
-.rhead ha-icon { --mdc-icon-size: 22px; color: var(--ri, var(--rain)); }
-.rtitle { font-size: 15px; font-weight: 500; line-height: 1.2; }
-.rsub { font-size: 12px; color: var(--muted); }
-.bars { flex: 1; min-height: 42px; max-height: 96px; margin-top: 10px; display: flex; align-items: flex-end; gap: 2px;
-  border-bottom: 1px solid var(--faint); position: relative; padding-right: 34px; }
-.bars u { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(255, 255, 255, .08); text-decoration: none; }
-.bars u::after { content: attr(data-l); position: absolute; right: 0; top: -7px; font-size: 9.5px; color: var(--muted); opacity: .7; }
-.bars i { flex: 1; border-radius: 3px 3px 0 0; min-height: 2px; background: linear-gradient(180deg, #8fd0ff, #3d8fe0);
-  transition: height 1s ease; }
-.bars i.dry { background: rgba(255, 255, 255, .1); }
-.raxis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 3px; padding-right: 34px; }
-
-/* solar harvest */
-.harvest { padding: 11px 14px 12px; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center; }
-.harvest > ha-icon { --mdc-icon-size: 26px; color: var(--solar); grid-row: span 2; }
-.hline { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.hline b { font-size: 17px; font-weight: 500; } .hline span { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.hbar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
-.hbar i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, #ff9a3c, #ffd56b);
+.arcl { display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+.arcl ha-icon { --mdc-icon-size: 19px; vertical-align: -3px; margin-right: 3px; }
+.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; height: 124px; flex: none; }
+.tile { padding: 16px 18px 16px 20px; display: flex; align-items: center; gap: 16px; min-width: 0; text-align: left; }
+.tile .ti { --mdc-icon-size: 46px; color: var(--ti, var(--rain)); flex: none; }
+.tile .tt { flex: 1; min-width: 0; }
+.tile b { display: block; font-size: 25px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile b em { font-style: normal; font-size: 18px; font-weight: 400; color: var(--muted); }
+.tile small { display: block; font-size: 17px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .chev { --mdc-icon-size: 30px; color: var(--muted); flex: none; opacity: .7; }
+.hbar { height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .1); overflow: hidden; margin-top: 8px; }
+.hbar i { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, #ff9a3c, #ffd56b);
   transition: width 1.5s ease; }
-.hnext { grid-column: 2; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 
-/* energy */
-.energy { padding: 15px 16px 14px; display: flex; flex-direction: column; }
-.ehead { display: flex; align-items: center; gap: 12px; }
-.ebadge { width: 44px; height: 44px; border-radius: 50%; flex: none; display: grid; place-items: center; color: #0b0f1e;
-  background: var(--accent); transition: background 1s; box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 45%, transparent); }
-.ebadge ha-icon { --mdc-icon-size: 24px; }
-.etext { flex: 1; min-width: 0; }
-.etitle { font-size: 20px; font-weight: 500; line-height: 1.15; color: var(--accent); transition: color 1s; }
-.esub { font-size: 12.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.score { flex: none; display: flex; flex-direction: column; align-items: center; color: var(--sc); line-height: 1; }
-.score .pill { display: flex; align-items: center; gap: 4px; padding: 6px 10px 6px 8px; border-radius: 18px;
-  background: color-mix(in srgb, var(--sc) 17%, transparent); border: 1px solid color-mix(in srgb, var(--sc) 35%, transparent); }
-.score ha-icon { --mdc-icon-size: 18px; }
-.score b { font-size: 18px; font-weight: 600; }
-.score span { font-size: 10px; color: var(--muted); margin-top: 4px; letter-spacing: .02em; }
-.pop { position: absolute; right: 12px; top: 72px; width: 250px; padding: 13px 14px; border-radius: 18px; z-index: 3;
-  background: rgba(10, 14, 30, .96); border: 1px solid var(--edge); box-shadow: 0 18px 40px rgba(0, 0, 0, .45);
-  opacity: 0; transform: translateY(-6px) scale(.98); pointer-events: none; transition: opacity .25s, transform .25s; }
-.pop.on { opacity: 1; transform: none; pointer-events: auto; }
-.pop p { margin: 0 0 10px; font-size: 12px; color: var(--muted); line-height: 1.4; }
-.prow { margin-top: 9px; font-size: 13px; }
-.prow div { display: flex; justify-content: space-between; } .prow b { font-weight: 600; }
-.prow .hbar { margin-top: 5px; }
-
-.flow { position: relative; width: 352px; height: 252px; margin: 12px auto 0; }
+/* ── Energie ── */
+.ehead { display: flex; align-items: center; gap: 16px; padding: 0 6px; flex: none; }
+.ebadge { width: 58px; height: 58px; border-radius: 50%; flex: none; display: grid; place-items: center; color: #0b0f1e;
+  background: var(--accent); transition: background 1s; box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 45%, transparent); }
+.ebadge ha-icon { --mdc-icon-size: 32px; }
+.etitle { font-size: 34px; font-weight: 400; line-height: 1.1; color: var(--accent); transition: color 1s; }
+.esub { font-size: 19px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ebody { flex: 1; display: grid; grid-template-columns: 528px 1fr; gap: 20px; min-height: 0; align-items: center; }
+.fwrap { position: relative; width: 528px; height: 378px; }
+.flow { position: absolute; left: 0; top: 0; width: 352px; height: 252px; transform: scale(1.5); transform-origin: 0 0; }
 .flow svg { position: absolute; inset: 0; overflow: visible; }
 .ln { fill: none; stroke-width: 3; opacity: .14; transition: opacity 1s; }
 .ln.on { opacity: .32; }
@@ -371,73 +398,110 @@ canvas.on { opacity: 1; }
 @keyframes ring { from { transform: scale(1); opacity: .55; } to { transform: scale(1.5); opacity: 0; } }
 .val { position: absolute; font-size: 15px; font-weight: 500; white-space: nowrap; line-height: 1.2; }
 .val small { display: block; font-size: 11.5px; font-weight: 400; color: var(--muted); }
-.mid { position: absolute; left: 176px; top: 104px; transform: translateX(-50%); text-align: center; }
-.mid b { display: block; font-size: 34px; font-weight: 300; line-height: 1; letter-spacing: -.01em; }
+.mid { position: absolute; left: 176px; top: 102px; transform: translateX(-50%); text-align: center; }
+.mid b { display: block; font-size: 36px; font-weight: 300; line-height: 1; letter-spacing: -.01em; }
 .mid span { font-size: 11.5px; color: var(--muted); }
+.escore { align-self: stretch; margin: 6px 0 10px; padding: 20px 24px; display: flex; flex-direction: column; text-align: left; }
+.sbig { display: flex; align-items: center; gap: 8px; color: var(--sc); margin-top: 8px; transition: color 1s; }
+.sbig ha-icon { --mdc-icon-size: 48px; }
+.sbig b { font-size: 92px; font-weight: 300; line-height: .95; letter-spacing: -.03em; }
+.sbig span { font-size: 22px; color: var(--muted); align-self: flex-end; margin-bottom: 12px; }
+.escore p { font-size: 16.5px; color: var(--muted); line-height: 1.4; margin: 10px 0 0; }
+.prows { margin-top: auto; display: flex; flex-direction: column; gap: 16px; }
+.prow > div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; }
+.prow b { font-size: 22px; font-weight: 500; }
 
-.graph { margin-top: 12px; }
-.graph svg { display: block; width: 100%; height: 60px; }
-.g-solar { fill: url(#gsolar); stroke: var(--solar); stroke-width: 1.5; }
-.g-house { fill: none; stroke: var(--home); stroke-width: 1.8; }
+/* ── Vandaag ── */
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin: 0 6px 0 4px; }
+.gcard { flex: 1; min-height: 0; padding: 16px 18px 10px; display: flex; flex-direction: column; }
+.gcard svg { flex: 1; width: 100%; min-height: 0; display: block; }
+.g-solar { fill: url(#gsolar); stroke: var(--solar); stroke-width: 2.5; }
+.g-house { fill: none; stroke: var(--home); stroke-width: 3; }
 .g-base { stroke: var(--faint); stroke-width: 1; }
-.legend { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 3px; }
-.legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 3px 0 8px; }
-.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: auto; }
-.chip { background: rgba(255, 255, 255, .05); border-radius: 12px; padding: 8px 9px; display: flex; align-items: center;
-  gap: 7px; min-width: 0; }
-.chip ha-icon { --mdc-icon-size: 18px; color: var(--ic); flex: none; }
-.chip b { font-size: 13.5px; font-weight: 500; display: block; white-space: nowrap; }
-.chip span { font-size: 10.5px; color: var(--muted); display: block; white-space: nowrap; }
+.g-guide { stroke: rgba(255, 255, 255, .07); stroke-width: 1; stroke-dasharray: 3 6; }
+.gaxis { display: flex; justify-content: space-between; font-size: 16px; color: var(--muted); margin-top: 6px; }
+.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: none; }
+.chip { background: var(--glass); border: 1px solid var(--edge); border-radius: 20px; padding: 11px 16px; display: flex;
+  align-items: center; gap: 14px; min-width: 0; }
+.chip ha-icon { --mdc-icon-size: 30px; color: var(--ic); flex: none; }
+.chip b { font-size: 27px; font-weight: 400; display: block; white-space: nowrap; line-height: 1.15; }
+.chip span { font-size: 15px; color: var(--muted); display: block; white-space: nowrap; }
 
-/* climate */
-.climate { padding: 12px 14px 8px; flex: 1; display: flex; flex-direction: column; }
-#rooms { flex: 1; display: flex; flex-direction: column; justify-content: space-around; }
-.chead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
-.chead span { font-size: 12.5px; color: var(--muted); }
-.room { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 6px 6px 6px 8px;
-  margin: 0 -6px 0 -8px; border-radius: 14px; transition: background 1s; }
-.room.heat { background: linear-gradient(90deg, rgba(255, 138, 76, .2), rgba(255, 138, 76, 0) 85%); }
-.rname { min-width: 0; }
-.rname b { display: block; font-size: 14.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rname span { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
-.rname ha-icon { --mdc-icon-size: 13px; }
-.heat .rname span { color: var(--heat); }
-.cur { font-size: 22px; font-weight: 300; min-width: 48px; text-align: right; }
+/* ── Regen ── */
+.rhead { display: flex; align-items: center; gap: 18px; padding: 0 6px; flex: none; }
+.rhead ha-icon { --mdc-icon-size: 58px; color: var(--ri, var(--rain)); }
+.rtitle { font-size: 36px; font-weight: 400; line-height: 1.15; }
+.rsub { font-size: 20px; color: var(--muted); margin-top: 3px; }
+.rcard { flex: 1; min-height: 0; padding: 26px 22px 14px; display: flex; flex-direction: column; }
+.bars { flex: 1; display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--faint);
+  position: relative; padding-right: 66px; }
+.bars u { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(255, 255, 255, .1); text-decoration: none; }
+.bars u::after { content: attr(data-l); position: absolute; right: 0; top: -11px; font-size: 15px; color: var(--muted); }
+.bars i { flex: 1; border-radius: 5px 5px 0 0; min-height: 3px; background: linear-gradient(180deg, #8fd0ff, #3d8fe0);
+  transition: height 1s ease; }
+.bars i.dry { background: rgba(255, 255, 255, .12); }
+.raxis { display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); margin-top: 8px; padding-right: 66px; }
+
+/* ── Klimaat ── */
+.kbody { flex: 1; display: grid; grid-template-columns: 1fr 392px; gap: 14px; min-height: 0; }
+.rlist { display: grid; grid-auto-rows: 1fr; gap: 10px; min-height: 0; }
+.room { padding: 8px 12px 8px 22px; border-radius: 22px; display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+  gap: 14px; min-width: 0; transition: background 1s, border-color 1s; }
+.room.heat { background: linear-gradient(100deg, rgba(255, 138, 76, .3), rgba(255, 138, 76, .05) 70%), var(--glass);
+  border-color: rgba(255, 138, 76, .35); }
+.rtop { text-align: left; min-width: 0; }
+.rtop b { display: block; font-size: 23px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rtop span { display: flex; align-items: center; gap: 5px; font-size: 16px; color: var(--muted); margin-top: 1px; }
+.rtop ha-icon { --mdc-icon-size: 18px; }
+.heat .rtop span { color: var(--heat); }
+.cur { font-size: 50px; font-weight: 200; line-height: 1; letter-spacing: -.03em; white-space: nowrap; }
 .heat .cur { color: var(--heat); }
-.ctl { display: flex; align-items: center; gap: 3px; }
-.ctl button { width: 33px; height: 33px; border-radius: 50%; font-size: 19px; line-height: 1;
-  background: rgba(255, 255, 255, .08); display: grid; place-items: center; }
-.ctl button:active { background: rgba(90, 174, 255, .4); }
+.ctl { display: flex; align-items: center; gap: 4px; }
+.ctl button { width: 58px; height: 58px; border-radius: 50%; font-size: 32px; font-weight: 300; line-height: 1;
+  background: rgba(255, 255, 255, .1); border: 1px solid var(--edge); display: grid; place-items: center; }
+.ctl button:active { background: rgba(90, 174, 255, .45); }
 .ctl button:disabled { opacity: .25; }
-.tgt { min-width: 40px; text-align: center; font-size: 14px; color: var(--muted); transition: color .3s; }
+.tgt { min-width: 72px; text-align: center; font-size: 23px; transition: color .3s; }
+.tgt small { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .tgt.pend { color: var(--home); font-weight: 600; }
-.water { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 6px 0 2px;
-  border-top: 1px solid var(--faint); margin-top: 4px; }
-.water ha-icon { --mdc-icon-size: 15px; }
-.water.on ha-icon { color: var(--heat); }
+.gas { padding: 16px 20px 12px; display: flex; flex-direction: column; text-align: left; min-height: 0; }
+.gtop { display: flex; align-items: baseline; justify-content: space-between; }
+.gbig { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; white-space: nowrap; }
+.gbig b { font-size: 46px; font-weight: 300; line-height: 1.05; color: var(--heat); }
+.gbig span { font-size: 17px; color: var(--muted); }
+.gsub { font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 10px; }
+.gh { height: 88px; display: flex; align-items: flex-end; gap: 2px; margin-top: 6px; border-bottom: 1px solid var(--faint); }
+.gh i { flex: 1; min-height: 2px; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, #ffb27a, #e8642c);
+  transition: height 1s ease; }
+.gh i.z { background: rgba(255, 255, 255, .12); }
+.ghx { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-top: 4px; }
+.gd { flex: 1; min-height: 0; display: flex; gap: 8px; margin-top: 6px; }
+.gd > div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
+.gd em { font-style: normal; font-size: 14px; color: var(--muted); margin-bottom: 3px; white-space: nowrap; }
+.gd i { width: 100%; min-height: 2px; border-radius: 5px 5px 0 0; background: rgba(255, 138, 76, .45); transition: height 1s ease; }
+.gd .now i { background: linear-gradient(180deg, #ffb27a, #e8642c); }
+.gd .now em, .gd .now span { color: var(--text); }
+.gd span { font-size: 15px; color: var(--muted); margin-top: 4px; }
+#water.on ha-icon { color: var(--heat); }
 
-/* lights */
-.lights { padding: 11px 12px 12px; }
-.lhead { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 8px; }
-.lhead span { font-size: 12.5px; color: var(--muted); }
-.lgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.lt { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 14px; text-align: left;
-  background: rgba(255, 255, 255, .05); min-width: 0; }
-.lt .i { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  background: rgba(255, 255, 255, .07); color: var(--muted); transition: all .5s; }
-.lt .i ha-icon { --mdc-icon-size: 19px; }
-.lt b { display: block; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lt small { display: block; font-size: 11px; color: var(--muted); }
-.lt.on { background: linear-gradient(135deg, rgba(255, 196, 107, .24), rgba(255, 196, 107, .07)); }
-.lt.on .i { background: #ffc46b; color: #2a1a00; box-shadow: 0 0 16px rgba(255, 196, 107, .55); }
+/* ── Lampen ── */
+.lgrid { flex: 1; display: grid; gap: 14px; min-height: 0; }
+.lt { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 14px 10px;
+  text-align: center; min-width: 0; }
+.lt .i { width: 90px; height: 90px; border-radius: 50%; display: grid; place-items: center; flex: none; margin-bottom: 6px;
+  background: rgba(255, 255, 255, .08); color: var(--muted); transition: all .5s; }
+.lt .i ha-icon { --mdc-icon-size: 48px; }
+.lt b { display: block; max-width: 100%; font-size: 23px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt small { display: block; font-size: 17px; color: var(--muted); }
+.lt.on { background: linear-gradient(160deg, rgba(255, 196, 107, .34), rgba(255, 196, 107, .07)), var(--glass);
+  border-color: rgba(255, 196, 107, .4); }
+.lt.on .i { background: #ffc46b; color: #2a1a00; box-shadow: 0 0 36px rgba(255, 196, 107, .6); }
 .lt.pend { opacity: .65; }
 .lt:disabled { opacity: .35; }
-
-/* scenes */
-.scenes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
-.sc { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0 8px; border-radius: 16px; }
-.sc ha-icon { --mdc-icon-size: 21px; color: var(--muted); transition: color .3s; }
-.sc span { font-size: 11.5px; color: var(--muted); }
+.scenes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; height: 104px; flex: none; }
+.sc { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+.sc ha-icon { --mdc-icon-size: 34px; color: var(--muted); transition: color .3s; }
+.sc span { font-size: 19px; color: var(--muted); }
 .sc.flash { background: rgba(255, 196, 107, .28); border-color: rgba(255, 196, 107, .5); }
 .sc.flash ha-icon { color: #ffc46b; }
 `;
@@ -454,6 +518,9 @@ class HomelabAmbientPanel extends HTMLElement {
     this._tempTimers = {};
     this._pendingLight = {};
     this._cache = {};
+    this._hideT = {};
+    this._idx = 0;
+    this._holdUntil = 0;
   }
 
   getCardSize() {
@@ -466,6 +533,7 @@ class HomelabAmbientPanel extends HTMLElement {
     if (!this._skyAt) this._sky();
     this._update();
     if (!this._histAt || Date.now() - this._histAt > 5 * 60 * 1000) this._loadHistory();
+    if (!this._gasAt || Date.now() - this._gasAt > 15 * 60 * 1000) this._loadGas();
   }
 
   connectedCallback() {
@@ -476,6 +544,7 @@ class HomelabAmbientPanel extends HTMLElement {
     clearInterval(this._clockT);
     clearInterval(this._skyT);
     clearInterval(this._shiftT);
+    clearTimeout(this._autoT);
     cancelAnimationFrame(this._rainRaf);
     this._rainRaf = null;
     if (this._ro) this._ro.disconnect();
@@ -506,6 +575,9 @@ class HomelabAmbientPanel extends HTMLElement {
     const scenes = c.scenes
       .map((s, i) => `<button class="sc glass press" data-act="scene" data-i="${i}"><ha-icon icon="${s.icon}"></ha-icon><span>${s.name}</span></button>`)
       .join('');
+    const nav = SLIDES.map((s, i) => `<button class="nb" data-act="nav" data-i="${i}" style="--ac:${s.ac}">
+        <ha-icon icon="${s.icon}"></ha-icon><span>${s.name}</span><em class="bd" id="bd-${s.id}"></em></button>`).join('');
+    const slide = (id, html) => `<section class="slide" id="s-${id}">${html}</section>`;
 
     this._root = this.attachShadow({ mode: 'open' });
     this._root.innerHTML = `<style>${STYLE}</style>
@@ -513,107 +585,145 @@ class HomelabAmbientPanel extends HTMLElement {
       <div class="stars">${stars}</div>
       <div class="clouds"><i></i><i></i><i></i><i></i></div>
       <canvas id="rainfx"></canvas>
-      <div class="stage" id="stage">
-        <section class="col">
-          <div class="clock">
-            <div class="greet"><span id="greet"></span><i class="off" id="offline" title="geen verbinding met Home Assistant"></i></div>
-            <div class="time" id="time"></div>
-            <div class="date" id="date"></div>
-          </div>
-          <div class="glass weather press" data-act="info" data-entity="${c.weather}">
-            <div class="wrow">
-              <div class="wicon" id="wicon"></div>
-              <div><div class="temp" id="temp">–</div><div class="cond" id="cond"></div></div>
+      <div class="stage" id="stage" style="--rot:${c.rotate}s">
+        <div class="slides" id="slides">
+        ${slide('nu', `
+          <div class="nu">
+            <div class="nleft">
+              <div class="greet"><span id="greet"></span><i class="off" id="offline" title="geen verbinding met Home Assistant"></i></div>
+              <div class="time" id="time"></div>
+              <div class="date" id="date"></div>
+            </div>
+            <div class="glass nweather press" data-act="info" data-entity="${c.weather}">
+              <div class="wrow">
+                <div class="wicon" id="wicon"></div>
+                <div class="temp" id="temp">–</div>
+              </div>
+              <div class="cond" id="cond"></div>
               <div class="wmeta" id="wmeta"></div>
+              <div class="arc">
+                <svg viewBox="0 0 252 50">
+                  <defs><linearGradient id="arcg" x1="0" x2="1"><stop offset="0" stop-color="#ff8a4c"/><stop offset="1" stop-color="#ffd56b"/></linearGradient></defs>
+                  <line class="hz" x1="0" y1="46" x2="252" y2="46"/>
+                  <path class="bg" d="M14 46Q126 -20 238 46"/>
+                  <path class="fg" id="arcfg"/>
+                  <g id="arcsun"><circle class="glw" r="9"/><circle class="dot" r="4.5"/></g>
+                </svg>
+                <div class="arcl"><span id="rise"></span><span id="daylen"></span><span id="set"></span></div>
+              </div>
             </div>
-            <div class="arc">
-              <svg viewBox="0 0 252 50">
-                <defs><linearGradient id="arcg" x1="0" x2="1"><stop offset="0" stop-color="#ff8a4c"/><stop offset="1" stop-color="#ffd56b"/></linearGradient></defs>
-                <line class="hz" x1="0" y1="46" x2="252" y2="46"/>
-                <path class="bg" d="M14 46Q126 -20 238 46"/>
-                <path class="fg" id="arcfg"/>
-                <g id="arcsun"><circle class="glw" r="9"/><circle class="dot" r="4.5"/></g>
-              </svg>
-              <div class="arcl"><span id="rise"></span><span id="daylen"></span><span id="set"></span></div>
-            </div>
           </div>
-          <div class="glass rain press" data-act="info" data-entity="${c.rain}">
-            <div class="rhead"><ha-icon id="ricon" icon="mdi:weather-partly-cloudy"></ha-icon>
-              <div><div class="rtitle" id="rtitle">Regenverwachting</div><div class="rsub" id="rsub"></div></div></div>
-            <div class="bars" id="bars"></div>
-            <div class="raxis" id="raxis"></div>
-          </div>
-          <div class="glass harvest press" data-act="info" data-entity="${c.solar_today}">
-            <ha-icon icon="mdi:solar-power-variant"></ha-icon>
-            <div class="hline"><b id="hnow">–</b><span id="hfc"></span></div>
-            <div class="hbar"><i id="hbar"></i></div>
-            <div class="hnext" id="hnext"></div>
-          </div>
-        </section>
-
-        <section class="glass energy" id="energy">
-          <div class="ehead">
-            <div class="ebadge"><ha-icon id="eicon"></ha-icon></div>
-            <div class="etext"><div class="etitle" id="etitle"></div><div class="esub" id="esub"></div></div>
-            <button class="score press" id="score" data-act="score">
-              <span class="pill"><ha-icon id="sicon" icon="mdi:leaf"></ha-icon><b id="snum">–</b></span>
-              <span>energiescore</span>
+          <div class="strip">
+            <button class="glass tile press" id="nr" data-act="go" data-go="regen">
+              <ha-icon class="ti" id="nr-icon" icon="mdi:weather-partly-cloudy"></ha-icon>
+              <div class="tt"><b id="nr-title">Regenverwachting</b><small id="nr-sub"></small></div>
+              <ha-icon class="chev" icon="mdi:chevron-right"></ha-icon>
             </button>
+            <button class="glass tile press" data-act="go" data-go="vandaag" style="--ti:var(--solar)">
+              <ha-icon class="ti" icon="mdi:solar-power-variant"></ha-icon>
+              <div class="tt"><b><span id="hnow">–</span> <em id="hfc"></em></b>
+                <div class="hbar"><i id="hbar"></i></div><small id="hnext"></small></div>
+              <ha-icon class="chev" icon="mdi:chevron-right"></ha-icon>
+            </button>
+          </div>`)}
+
+        ${slide('energie', `
+          <div class="ehead" id="energy">
+            <div class="ebadge"><ha-icon id="eicon"></ha-icon></div>
+            <div style="min-width:0"><div class="etitle" id="etitle"></div><div class="esub" id="esub"></div></div>
           </div>
-          <div class="pop" id="pop" data-act="score">
-            <p>Hoe slim we vandaag met stroom omgaan: eigen zonnestroom zelf gebruiken, en van het net halen als het goedkoop is.</p>
-            <div class="prow"><div><span>Eigen zon zelf gebruikt</span><b id="p-sc">–</b></div><div class="hbar"><i id="pb-sc"></i></div></div>
-            <div class="prow"><div><span>Slim getimed (prijs)</span><b id="p-pr">–</b></div><div class="hbar"><i id="pb-pr"></i></div></div>
-          </div>
-          <div class="flow">
-            <svg viewBox="0 0 352 252" width="352" height="252">
-              <path class="ln s-solar" id="l-sh" d="M197 71Q262 96 276 163"/>
-              <path class="ln s-export" id="l-sg" d="M155 71Q90 96 76 163"/>
-              <path class="ln s-grid" id="l-gh" d="M90 188L262 188"/>
-              <path class="dots s-solar" id="f-sh" d="M197 71Q262 96 276 163"/>
-              <path class="dots s-export" id="f-sg" d="M155 71Q90 96 76 163"/>
-              <path class="dots s-grid" id="f-gh" d="M90 188L262 188"/>
-            </svg>
-            <div class="node" id="n-solar" style="left:176px;top:46px;--nc:var(--solar)"><ha-icon icon="mdi:solar-power-variant"></ha-icon></div>
-            <div class="node" id="n-grid" style="left:56px;top:188px;--nc:var(--grid)"><ha-icon icon="mdi:transmission-tower"></ha-icon></div>
-            <div class="node" id="n-home" style="left:296px;top:188px;--nc:var(--home)"><ha-icon icon="mdi:home-lightning-bolt"></ha-icon></div>
-            <div class="val" id="v-solar" style="left:218px;top:22px"></div>
-            <div class="val" id="v-grid" style="left:56px;top:224px;transform:translateX(-50%);text-align:center"></div>
-            <div class="val" id="v-home" style="left:296px;top:224px;transform:translateX(-50%);text-align:center"></div>
-            <div class="mid"><b id="m-house">–</b><span>verbruik nu</span></div>
-          </div>
-          <div class="graph">
-            <svg viewBox="0 0 352 38" preserveAspectRatio="none">
-              <defs><linearGradient id="gsolar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb938" stop-opacity=".55"/><stop offset="1" stop-color="#ffb938" stop-opacity=".05"/></linearGradient></defs>
-              <line class="g-base" x1="0" y1="37.5" x2="352" y2="37.5" vector-effect="non-scaling-stroke"/>
+          <div class="ebody">
+            <div class="fwrap"><div class="flow">
+              <svg viewBox="0 0 352 252" width="352" height="252">
+                <path class="ln s-solar" id="l-sh" d="M197 71Q262 96 276 163"/>
+                <path class="ln s-export" id="l-sg" d="M155 71Q90 96 76 163"/>
+                <path class="ln s-grid" id="l-gh" d="M90 188L262 188"/>
+                <path class="dots s-solar" id="f-sh" d="M197 71Q262 96 276 163"/>
+                <path class="dots s-export" id="f-sg" d="M155 71Q90 96 76 163"/>
+                <path class="dots s-grid" id="f-gh" d="M90 188L262 188"/>
+              </svg>
+              <div class="node" id="n-solar" style="left:176px;top:46px;--nc:var(--solar)"><ha-icon icon="mdi:solar-power-variant"></ha-icon></div>
+              <div class="node" id="n-grid" style="left:56px;top:188px;--nc:var(--grid)"><ha-icon icon="mdi:transmission-tower"></ha-icon></div>
+              <div class="node" id="n-home" style="left:296px;top:188px;--nc:var(--home)"><ha-icon icon="mdi:home-lightning-bolt"></ha-icon></div>
+              <div class="val" id="v-solar" style="left:218px;top:22px"></div>
+              <div class="val" id="v-grid" style="left:56px;top:224px;transform:translateX(-50%);text-align:center"></div>
+              <div class="val" id="v-home" style="left:296px;top:224px;transform:translateX(-50%);text-align:center"></div>
+              <div class="mid"><b id="m-house">–</b><span>verbruik nu</span></div>
+            </div></div>
+            <button class="glass escore press" id="score" data-act="info" data-entity="${c.score}">
+              <div class="label">Energiescore vandaag</div>
+              <div class="sbig"><ha-icon id="sicon" icon="mdi:leaf"></ha-icon><b id="snum">–</b><span>/ 100</span></div>
+              <p>Eigen zonnestroom zelf gebruiken, en van het net halen als het goedkoop is.</p>
+              <div class="prows">
+                <div class="prow"><div><span>Eigen zon zelf gebruikt</span><b id="p-sc">–</b></div><div class="hbar"><i id="pb-sc"></i></div></div>
+                <div class="prow"><div><span>Slim getimed (prijs)</span><b id="p-pr">–</b></div><div class="hbar"><i id="pb-pr"></i></div></div>
+              </div>
+            </button>
+          </div>`)}
+
+        ${slide('vandaag', `
+          <div class="shead"><h2>Vandaag</h2>
+            <span class="legend"><span><i style="background:var(--solar)"></i>zon</span><span><i style="background:var(--home)"></i>huis</span><span id="g-peak"></span></span></div>
+          <div class="glass gcard">
+            <svg viewBox="0 0 ${GW} ${GH}" preserveAspectRatio="none">
+              <defs><linearGradient id="gsolar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb938" stop-opacity=".6"/><stop offset="1" stop-color="#ffb938" stop-opacity=".04"/></linearGradient></defs>
+              <line class="g-guide" x1="0" y1="${GH * 0.36}" x2="${GW}" y2="${GH * 0.36}" vector-effect="non-scaling-stroke"/>
+              <line class="g-guide" x1="0" y1="${GH * 0.68}" x2="${GW}" y2="${GH * 0.68}" vector-effect="non-scaling-stroke"/>
+              <line class="g-base" x1="0" y1="${GH - 0.5}" x2="${GW}" y2="${GH - 0.5}" vector-effect="non-scaling-stroke"/>
               <path id="g-solar" class="g-solar" vector-effect="non-scaling-stroke"/>
               <path id="g-house" class="g-house" vector-effect="non-scaling-stroke"/>
             </svg>
-            <div class="legend"><span>${c.graph_hours} uur geleden</span>
-              <span><i style="background:var(--solar)"></i>zon<i style="background:var(--home)"></i>huis <span id="g-peak"></span></span>
-              <span>nu</span></div>
+            <div class="gaxis" id="gaxis"></div>
           </div>
-          <div class="chips" id="chips"></div>
-        </section>
+          <div class="chips" id="chips"></div>`)}
 
-        <section class="col">
-          <div class="glass climate">
-            <div class="chead"><span class="label">Klimaat</span><span id="outdoor"></span></div>
-            <div id="rooms"></div>
-            <div class="water" id="water"></div>
-          </div>
-          <div class="glass lights">
-            <div class="lhead"><span class="label">Lampen</span><span id="lcount"></span></div>
-            <div class="lgrid" id="lgrid"></div>
-          </div>
-          <div class="scenes">${scenes}</div>
-        </section>
+        ${slide('regen', `
+          <div class="rhead"><ha-icon id="ricon" icon="mdi:weather-partly-cloudy"></ha-icon>
+            <div><div class="rtitle" id="rtitle">Regenverwachting</div><div class="rsub" id="rsub"></div></div></div>
+          <div class="glass rcard press" data-act="info" data-entity="${c.rain}">
+            <div class="bars" id="bars"></div>
+            <div class="raxis" id="raxis"></div>
+          </div>`)}
+
+        ${slide('klimaat', `
+          <div class="shead"><h2>Klimaat</h2><span><span id="outdoor"></span><span id="water"></span></span></div>
+          <div class="kbody">
+            <div class="rlist" id="rooms"></div>
+            <button class="glass gas press" data-act="info" data-entity="${c.gas}">
+              <div class="gtop"><span class="label">Gas</span><span class="label" id="gas-cost"></span></div>
+              <div class="gbig"><b id="gas-today">–</b><span id="gas-cmp"></span></div>
+              <div class="gsub">Per uur, laatste 24 uur</div>
+              <div class="gh" id="gas-h"></div>
+              <div class="ghx" id="gas-hx"></div>
+              <div class="gsub">Per dag</div>
+              <div class="gd" id="gas-d"></div>
+            </button>
+          </div>`)}
+
+        ${slide('lampen', `
+          <div class="shead"><h2>Lampen</h2><span id="lcount"></span></div>
+          <div class="lgrid" id="lgrid" style="grid-template-columns:repeat(${Math.min(4, c.lights.length) || 1}, 1fr)"></div>
+          <div class="scenes">${scenes}</div>`)}
+        </div>
+        <nav class="nav"><div class="ntime" id="ntime"></div>${nav}</nav>
       </div>
       <div class="veil" id="veil"></div>`;
 
     const $ = (id) => this._root.getElementById(id);
     this._el = new Proxy({}, { get: (o, k) => o[k] || (o[k] = $(k)) });
+    this._navs = [...this._root.querySelectorAll('.nb')];
+    this._idx = clamp(SLIDES.findIndex((s) => s.id === c.start), 0, SLIDES.length - 1);
+    this._place(this._idx, 0, 0, false);
+    this._slide(this._idx).classList.add('on');
+    this._nav();
+
     this._root.addEventListener('click', (ev) => this._onClick(ev));
+    this._root.addEventListener('pointerdown', () => this._hold(), true);
+    const sl = this._el.slides;
+    sl.addEventListener('pointerdown', (ev) => this._onDown(ev));
+    sl.addEventListener('pointermove', (ev) => this._onMove(ev));
+    sl.addEventListener('pointerup', (ev) => this._onUp(ev, false));
+    sl.addEventListener('pointercancel', (ev) => this._onUp(ev, true));
     if (this.isConnected) this._start();
   }
 
@@ -636,40 +746,209 @@ class HomelabAmbientPanel extends HTMLElement {
     this._ro.observe(this);
     this._fit();
     if (this._rainLevel) this._rainLoop();
+    this._arm();
   }
 
   _fit() {
     const w = this.clientWidth;
     const h = this.clientHeight;
     if (!w || !h) return;
-    this._el.stage.style.setProperty('--k', Math.min(w / W, h / H).toFixed(4));
+    this._k = Math.min(w / W, h / H);
+    this._el.stage.style.setProperty('--k', this._k.toFixed(4));
     const cv = this._el.rainfx;
     cv.width = Math.round(w);
     cv.height = Math.round(h);
   }
 
+  // ── carousel ──
+  // Slides sit side by side only while they move: the current one at 0, the incoming one at ±100%.
+  // That makes the loop endless in both directions without cloning slides.
+  _slide(i) {
+    return this._el[`s-${SLIDES[i].id}`];
+  }
+
+  _place(i, pct, px = 0, anim = true) {
+    const el = this._slide(i);
+    el.style.transition = anim ? '' : 'none';
+    el.style.transform = `translate3d(calc(${pct}% + ${px.toFixed(1)}px), 0, 0)`;
+  }
+
+  _show(i) {
+    clearTimeout(this._hideT[i]);
+    this._slide(i).classList.add('on');
+  }
+
+  _hideLater(i) {
+    clearTimeout(this._hideT[i]);
+    this._hideT[i] = setTimeout(() => {
+      if (i !== this._idx && !this._drag) this._slide(i).classList.remove('on');
+    }, 720);
+  }
+
+  _go(to, dir) {
+    const n = SLIDES.length;
+    to = ((to % n) + n) % n;
+    const from = this._idx;
+    if (to === from) {
+      this._arm();
+      return;
+    }
+    if (!dir) dir = to > from ? 1 : -1;
+    this._place(to, dir * 100, 0, false);
+    this._show(to);
+    void this._slide(to).offsetWidth; // commit the start position before animating
+    this._place(to, 0);
+    this._place(from, -dir * 100);
+    this._idx = to;
+    this._hideLater(from);
+    this._nav();
+    this._arm();
+  }
+
+  _nav() {
+    this._navs.forEach((b, i) => b.classList.toggle('on', i === this._idx));
+  }
+
+  // Auto-advance; a touch holds it for `resume_after` seconds. The active button shows the countdown.
+  _arm() {
+    clearTimeout(this._autoT);
+    this._navs.forEach((b) => b.classList.remove('run', 'hold'));
+    const rot = Number(this._c.rotate);
+    if (!rot || !this._running) return;
+    const nb = this._navs[this._idx];
+    const wait = this._holdUntil - Date.now();
+    if (wait > 0) {
+      nb.classList.add('hold');
+      this._autoT = setTimeout(() => this._arm(), wait);
+      return;
+    }
+    void nb.offsetWidth; // restart the progress animation
+    nb.classList.add('run');
+    this._autoT = setTimeout(() => this._go(this._nextAuto(), 1), rot * 1000);
+  }
+
+  _hold() {
+    this._holdUntil = Date.now() + Number(this._c.resume_after) * 1000;
+    if (this._running) this._arm();
+  }
+
+  _nextAuto() {
+    const n = SLIDES.length;
+    const list = this._c.rotate_slides;
+    for (let k = 1; k <= n; k++) {
+      const i = (this._idx + k) % n;
+      const id = SLIDES[i].id;
+      if (Array.isArray(list) && !list.includes(id)) continue;
+      if (id === 'regen' && this._dry) continue; // the Nu slide already says it stays dry
+      return i;
+    }
+    return this._idx;
+  }
+
+  // Swipe: the current slide follows the finger with both neighbours next to it.
+  _onDown(ev) {
+    if (ev.button > 0 || this._ptr) return;
+    this._ptr = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, lx: ev.clientX, lt: ev.timeStamp, v: 0 };
+  }
+
+  _onMove(ev) {
+    const p = this._ptr;
+    if (!p || ev.pointerId !== p.id) return;
+    const k = this._k || 1;
+    const dx = (ev.clientX - p.x) / k;
+    if (!this._drag) {
+      const ax = Math.abs(ev.clientX - p.x);
+      const ay = Math.abs(ev.clientY - p.y);
+      if (ay > 24 && ay > ax) {
+        this._ptr = null;
+        return;
+      }
+      if (ax < 14) return;
+      this._drag = true;
+      try {
+        this._el.slides.setPointerCapture(p.id);
+      } catch (e) {
+        /* not supported: the drag still works while the finger stays on the slides */
+      }
+      const n = SLIDES.length;
+      p.prev = (this._idx - 1 + n) % n;
+      p.next = (this._idx + 1) % n;
+      this._show(p.prev);
+      this._show(p.next);
+    }
+    const dt = ev.timeStamp - p.lt;
+    if (dt > 0) {
+      p.v = (ev.clientX - p.lx) / k / dt;
+      p.lx = ev.clientX;
+      p.lt = ev.timeStamp;
+    }
+    this._place(this._idx, 0, dx, false);
+    this._place(p.prev, -100, dx, false);
+    this._place(p.next, 100, dx, false);
+  }
+
+  _onUp(ev, cancel) {
+    const p = this._ptr;
+    if (!p || ev.pointerId !== p.id) return;
+    this._ptr = null;
+    if (!this._drag) return;
+    this._drag = false;
+    this._dragEnd = Date.now();
+    const dx = cancel ? 0 : (ev.clientX - p.x) / (this._k || 1);
+    const fast = Date.now() - p.lt < 120 ? p.v : 0;
+    let dir = 0;
+    if (dx < -170 || (dx < -40 && fast < -0.35)) dir = 1;
+    else if (dx > 170 || (dx > 40 && fast > 0.35)) dir = -1;
+    const cur = this._idx;
+    if (dir === 0) {
+      this._place(cur, 0);
+      this._place(p.prev, -100);
+      this._place(p.next, 100);
+      this._hideLater(p.prev);
+      this._hideLater(p.next);
+    } else {
+      const to = dir === 1 ? p.next : p.prev;
+      const other = dir === 1 ? p.prev : p.next;
+      this._place(to, 0);
+      this._place(cur, -dir * 100);
+      this._place(other, dir === 1 ? -100 : 100);
+      this._idx = to;
+      this._hideLater(cur);
+      this._hideLater(other);
+      this._nav();
+    }
+    this._arm();
+  }
+
+  _badge(id, show, text, color) {
+    const b = this._el[`bd-${id}`];
+    const cls = !show ? 'bd' : text != null && text !== '' ? 'bd n' : 'bd dot';
+    if (b.className !== cls) b.className = cls;
+    const t = show && text != null ? String(text) : '';
+    if (b.textContent !== t) b.textContent = t;
+    if (color && b.dataset.c !== color) {
+      b.dataset.c = color;
+      b.style.setProperty('--bc', color);
+    }
+  }
+
   // ── interaction ──
   _onClick(ev) {
+    if (Date.now() - (this._dragEnd || 0) < 400) return; // the end of a swipe is not a tap
     const t = ev.target.closest('[data-act]');
     if (!t || t.disabled) return;
     const act = t.dataset.act;
     if (act === 'climate') this._step(t.dataset.entity, Number(t.dataset.dir));
     else if (act === 'light') this._toggleLight(t.dataset.entity);
     else if (act === 'scene') this._scene(t, Number(t.dataset.i));
-    else if (act === 'score') this._togglePop();
+    else if (act === 'nav') this._go(Number(t.dataset.i));
+    else if (act === 'go') this._go(SLIDES.findIndex((s) => s.id === t.dataset.go));
     else if (act === 'info') this._moreInfo(t.dataset.entity);
   }
 
   _moreInfo(entityId) {
     if (!entityId) return;
     this.dispatchEvent(new CustomEvent('hass-more-info', { detail: { entityId }, bubbles: true, composed: true }));
-  }
-
-  _togglePop(force) {
-    const on = force ?? !this._el.pop.classList.contains('on');
-    this._el.pop.classList.toggle('on', on);
-    clearTimeout(this._popT);
-    if (on) this._popT = setTimeout(() => this._togglePop(false), 10000);
   }
 
   _scene(btn, i) {
@@ -739,6 +1018,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._weather();
     this._rain();
     this._harvest();
+    this._gasRender();
     this._el.offline.classList.toggle('on', this._hass.connected === false);
   }
 
@@ -748,6 +1028,7 @@ class HomelabAmbientPanel extends HTMLElement {
     if (hm === this._hm) return;
     this._hm = hm;
     this._el.time.innerHTML = hm.replace(':', '<span class="c">:</span>');
+    this._el.ntime.textContent = hm;
     this._el.date.textContent = cap(now.toLocaleDateString(NL, { weekday: 'long', day: 'numeric', month: 'long' }));
     const h = now.getHours();
     this._el.greet.textContent = h < 6 ? 'Goedenacht' : h < 12 ? 'Goedemorgen' : h < 18 ? 'Goedemiddag' : 'Goedenavond';
@@ -837,8 +1118,8 @@ class HomelabAmbientPanel extends HTMLElement {
     const bft = bi == null ? null : bi === -1 ? 12 : bi;
     const dir = typeof a.wind_bearing === 'number' ? COMPASS[Math.round(a.wind_bearing / 45) % 8] : '';
     const meta = [
-      bft != null ? `<div><ha-icon icon="mdi:weather-windy"></ha-icon>${bft} Bft ${dir}</div>` : '',
-      a.humidity != null ? `<div><ha-icon icon="mdi:water-percent"></ha-icon>${Math.round(a.humidity)}%</div>` : '',
+      bft != null ? `<span><ha-icon icon="mdi:weather-windy"></ha-icon>${bft} Bft ${dir}</span>` : '',
+      a.humidity != null ? `<span><ha-icon icon="mdi:water-percent"></ha-icon>${Math.round(a.humidity)}%</span>` : '',
     ].join('');
     this._set('wmeta', this._el.wmeta, meta);
     const cond = w.state;
@@ -856,14 +1137,24 @@ class HomelabAmbientPanel extends HTMLElement {
     if (key === this._cache.rain) return;
     this._cache.rain = key;
     const e = this._el;
+    const head = (icon, title, sub, color) => {
+      e.ricon.setAttribute('icon', icon);
+      e['nr-icon'].setAttribute('icon', icon);
+      e.rtitle.textContent = title;
+      e['nr-title'].textContent = title;
+      e.rsub.textContent = sub;
+      e['nr-sub'].textContent = sub;
+      e['s-regen'].style.setProperty('--ri', color);
+      e.nr.style.setProperty('--ti', color);
+    };
     const [start, list] = (raw || '').split('|');
     const mm = (list || '').split(',').map(parseFloat).filter((v) => !Number.isNaN(v));
     if (!start || mm.length === 0) {
-      e.ricon.setAttribute('icon', 'mdi:weather-cloudy-alert');
-      e.rtitle.textContent = 'Regenverwachting';
-      e.rsub.textContent = 'geen gegevens van Buienradar';
+      head('mdi:weather-cloudy-alert', 'Regenverwachting', 'geen gegevens van Buienradar', 'var(--muted)');
       e.bars.innerHTML = '';
       e.raxis.innerHTML = '';
+      this._dry = true;
+      this._badge('regen', false);
       this._setRain(RAINY.has(cond) ? 1 : 0);
       return;
     }
@@ -890,14 +1181,13 @@ class HomelabAmbientPanel extends HTMLElement {
       title = `${cap(kind(peak))} om ${at(first)}`;
       sub = `over ${first * 5} minuten, tot ${fmt(peak, 1)} mm/u`;
     }
-    this._root.querySelector('.rain').style.setProperty('--ri', first === -1 ? 'var(--solar)' : 'var(--rain)');
-    e.ricon.setAttribute('icon', icon);
-    e.rtitle.textContent = title;
-    e.rsub.textContent = sub;
+    head(icon, title, sub, first === -1 ? 'var(--solar)' : 'var(--rain)');
+    this._dry = first === -1;
+    this._badge('regen', first !== -1, null, 'var(--rain)');
     // Square-root scale up to 5 mm/h: drizzle stays visible and a shower does not flatten the rest.
     // Guide lines at 0.5 / 2 / 5 mm/h (31% / 63% / 100% on the square-root scale).
     e.bars.innerHTML = '<u style="bottom:31%" data-l="licht"></u><u style="bottom:63%" data-l="matig"></u><u style="bottom:100%" data-l="zwaar"></u>' + mm
-      .map((v) => `<i class="${wet(v) ? '' : 'dry'}" style="height:${wet(v) ? Math.max(10, Math.min(100, Math.sqrt(v / 5) * 100)).toFixed(0) : 4}%"></i>`)
+      .map((v) => `<i class="${wet(v) ? '' : 'dry'}" style="height:${wet(v) ? Math.max(8, Math.min(100, Math.sqrt(v / 5) * 100)).toFixed(0) : 2}%"></i>`)
       .join('');
     e.raxis.innerHTML = `<span>nu</span><span>${at(6)}</span><span>${at(12)}</span><span>${at(18)}</span><span>${at(mm.length)}</span>`;
     this._setRain(wet(mm[0]) ? clamp(mm[0], 0.3, 8) : 0);
@@ -958,11 +1248,11 @@ class HomelabAmbientPanel extends HTMLElement {
     this._cache.harvest = key;
     const e = this._el;
     e.hnow.textContent = `${fmt(now)} kWh zon`;
-    e.hfc.textContent = fc == null ? '' : `van ${fmt(fc)} verwacht`;
+    e.hfc.textContent = fc == null ? '' : `van ${fmt(fc)}`;
     e.hbar.style.width = `${fc ? clamp((now || 0) / fc, 0, 1) * 100 : 0}%`;
     let next = '';
     if (tm != null) {
-      const more = fc != null && tm > fc * 1.25 ? ' · meer zon dan vandaag' : fc != null && tm < fc * 0.75 ? ' · minder zon dan vandaag' : '';
+      const more = fc != null && tm > fc * 1.25 ? ' · meer zon' : fc != null && tm < fc * 0.75 ? ' · minder zon' : '';
       next = `Morgen ${fmt(tm)} kWh verwacht${more}`;
     }
     e.hnext.textContent = next;
@@ -1024,10 +1314,11 @@ class HomelabAmbientPanel extends HTMLElement {
       title = 'Stroom van het net';
       sub = this._sun && this._sun.night ? 'de zon is onder' : 'te weinig zon op de panelen';
     }
-    e.energy.style.setProperty('--accent', accent);
+    e['s-energie'].style.setProperty('--accent', accent);
     if (e.eicon.getAttribute('icon') !== icon) e.eicon.setAttribute('icon', icon);
     e.etitle.textContent = title;
     e.esub.textContent = sub;
+    this._badge('energie', true, null, accent);
 
     const score = num(h, c.score);
     const sc = num(h, c.self_consumption);
@@ -1085,7 +1376,7 @@ class HomelabAmbientPanel extends HTMLElement {
   }
 
   _graph(t0, t1, [solarPts, housePts]) {
-    const N = 72; // 10-minute buckets over 12 hours
+    const N = 96; // buckets over the graph period
     const bucket = (pts) => {
       const out = [];
       let j = 0;
@@ -1108,16 +1399,100 @@ class HomelabAmbientPanel extends HTMLElement {
     const solar = bucket(solarPts);
     const house = bucket(housePts);
     const peak = Math.max(500, ...solar, ...house);
-    const x = (b) => ((b / (N - 1)) * 352).toFixed(1);
-    const y = (v) => (37 - (Math.max(v, 0) / peak) * 34).toFixed(1);
+    const x = (b) => ((b / (N - 1)) * GW).toFixed(1);
+    const y = (v) => (GH - 2 - (Math.max(v, 0) / peak) * (GH - 12)).toFixed(1);
     const line = (vals) => vals.map((v, b) => `${b ? 'L' : 'M'}${x(b)} ${y(v)}`).join('');
-    this._el['g-solar'].setAttribute('d', `${line(solar)}L352 37L0 37Z`);
+    this._el['g-solar'].setAttribute('d', `${line(solar)}L${GW} ${GH}L0 ${GH}Z`);
     this._el['g-house'].setAttribute('d', line(house));
-    this._el['g-peak'].textContent = `· piek ${power(Math.max(...solar, ...house))}`;
+    this._el['g-peak'].textContent = `piek ${power(Math.max(...solar, ...house))}`;
+    const ticks = [0, 0.25, 0.5, 0.75].map((q) => `<span>${hhmm(new Date(t0 + q * (t1 - t0)))}</span>`);
+    this._el.gaxis.innerHTML = `${ticks.join('')}<span>nu</span>`;
+  }
+
+  // Gas per hour and per day from the recorder's long-term statistics of the meter reading.
+  // The P1 gas meter reports about once an hour, so the newest hour can still be empty.
+  async _loadGas() {
+    if (this._gasLoading || !this._hass.callWS || !this._c.gas) return;
+    this._gasLoading = true;
+    this._gasAt = Date.now();
+    try {
+      const id = this._c.gas;
+      const h0 = new Date();
+      h0.setMinutes(0, 0, 0);
+      h0.setHours(h0.getHours() - 23);
+      const d0 = new Date();
+      d0.setHours(0, 0, 0, 0);
+      d0.setDate(d0.getDate() - 6);
+      const ask = (start, period) => this._hass.callWS({
+        type: 'recorder/statistics_during_period',
+        start_time: start.toISOString(),
+        statistic_ids: [id],
+        period,
+        types: ['change'],
+      });
+      const [hr, dr] = await Promise.all([ask(h0, 'hour'), ask(d0, 'day')]);
+      const slots = (rows, t0, n, next) => {
+        const out = new Array(n).fill(0);
+        const starts = [];
+        let t = new Date(t0);
+        for (let i = 0; i < n; i++) {
+          starts.push(t.getTime());
+          t = next(t);
+        }
+        for (const r of rows || []) {
+          const ms = typeof r.start === 'number' ? r.start : Date.parse(r.start);
+          const i = starts.findIndex((s, k) => ms >= s && (k === n - 1 || ms < starts[k + 1]));
+          if (i >= 0 && typeof r.change === 'number') out[i] += Math.max(r.change, 0);
+        }
+        return { starts, vals: out };
+      };
+      this._gasData = {
+        hours: slots(hr[id], h0, 24, (t) => new Date(t.getTime() + 3600000)),
+        days: slots(dr[id], d0, 7, (t) => { const d = new Date(t); d.setDate(d.getDate() + 1); return d; }),
+      };
+      this._cache.gas = null;
+      this._gasRender();
+    } catch (err) {
+      console.warn('homelab-ambient-panel: gas statistics failed', err);
+    } finally {
+      this._gasLoading = false;
+    }
+  }
+
+  _gasRender() {
+    const today = num(this._hass, this._c.gas_today);
+    const g = this._gasData;
+    const key = `${today}|${g ? g.hours.vals.join() + g.days.vals.join() : ''}`;
+    if (key === this._cache.gas) return;
+    this._cache.gas = key;
+    const e = this._el;
+    e['gas-today'].textContent = `${fmt(today, 2)} m³`;
+    const yest = g ? g.days.vals[5] : null;
+    e['gas-cmp'].textContent = yest ? `vandaag · gisteren ${fmt(yest, 1)}` : 'vandaag';
+    const price = this._c.gas_price;
+    e['gas-cost'].textContent = today != null && price != null ? `≈ € ${fmt(today * price, 2)}` : '';
+    if (!g) return;
+    const hv = g.hours.vals;
+    const hmax = Math.max(0.2, ...hv);
+    e['gas-h'].innerHTML = hv
+      .map((v) => `<i class="${v > 0.005 ? '' : 'z'}" style="height:${v > 0.005 ? Math.max(4, (v / hmax) * 100).toFixed(0) : 2}%"></i>`)
+      .join('');
+    const hl = [0, 6, 12, 18].map((i) => `<span>${hhmm(new Date(g.hours.starts[i]))}</span>`);
+    e['gas-hx'].innerHTML = `${hl.join('')}<span>nu</span>`;
+    const dv = g.days.vals.slice();
+    if (today != null) dv[6] = today; // the live daily counter is ahead of the hourly statistics
+    const dmax = Math.max(0.5, ...dv);
+    e['gas-d'].innerHTML = dv
+      .map((v, i) => {
+        const day = i === 6 ? 'nu' : new Date(g.days.starts[i]).toLocaleDateString(NL, { weekday: 'short' }).replace('.', '');
+        return `<div class="${i === 6 ? 'now' : ''}"><em>${fmt(v, 1)}</em><i style="height:${Math.max(2, (v / dmax) * 100).toFixed(0)}%"></i><span>${day}</span></div>`;
+      })
+      .join('');
   }
 
   _rooms() {
     const h = this._hass;
+    let heatingN = 0;
     const rows = this._c.rooms
       .map(({ entity, name }) => {
         const s = h.states[entity];
@@ -1126,26 +1501,28 @@ class HomelabAmbientPanel extends HTMLElement {
         const tgt = this._target(entity);
         const off = s.state === 'off' || tgt == null;
         const heating = a.hvac_action === 'heating';
+        if (heating) heatingN += 1;
         const status = heating
           ? '<ha-icon icon="mdi:fire"></ha-icon>verwarmt'
           : off ? 'uit' : a.current_humidity != null ? `${Math.round(a.current_humidity)}% vocht` : '';
-        return `<div class="room${heating ? ' heat' : ''}">
-          <div class="rname press" data-act="info" data-entity="${entity}"><b>${name || a.friendly_name}</b><span>${status}</span></div>
+        return `<div class="glass room${heating ? ' heat' : ''}">
+          <div class="rtop press" data-act="info" data-entity="${entity}"><b>${name || a.friendly_name}</b><span>${status}</span></div>
           <div class="cur">${fmt(a.current_temperature, 1)}°</div>
           <div class="ctl">
             <button class="press" data-act="climate" data-entity="${entity}" data-dir="-1"${off ? ' disabled' : ''} aria-label="lager">−</button>
-            <div class="tgt${this._pendingTemp[entity] ? ' pend' : ''}">${off ? 'uit' : `${fmt(tgt, 1)}°`}</div>
+            <div class="tgt${this._pendingTemp[entity] ? ' pend' : ''}"><small>doel</small>${off ? 'uit' : `${fmt(tgt, 1)}°`}</div>
             <button class="press" data-act="climate" data-entity="${entity}" data-dir="1"${off ? ' disabled' : ''} aria-label="hoger">+</button>
           </div></div>`;
       })
       .join('');
     this._set('rooms', this._el.rooms, rows);
+    this._badge('klimaat', heatingN > 0, heatingN, 'var(--heat)');
     const w = h.states[this._c.hot_water];
     const won = w && w.state !== 'off';
     this._el.water.classList.toggle('on', !!won);
-    this._set('water', this._el.water, w ? `<ha-icon icon="mdi:water-boiler"></ha-icon>Warm water ${won ? 'aan' : 'uit'}` : '');
+    this._set('water', this._el.water, w ? `<ha-icon icon="mdi:water-boiler"></ha-icon>warm water ${won ? 'aan' : 'uit'}` : '');
     const out = num(h, this._c.outdoor);
-    this._el.outdoor.textContent = out == null ? '' : `buiten ${fmt(out, 1)}°`;
+    this._set('outdoor', this._el.outdoor, out == null ? '' : `<ha-icon icon="mdi:thermometer"></ha-icon>buiten ${fmt(out, 1)}°`);
   }
 
   _lights() {
@@ -1160,13 +1537,14 @@ class HomelabAmbientPanel extends HTMLElement {
         const na = !s || st === 'unavailable';
         const bri = s && isOn && s.attributes.brightness != null && !this._pendingLight[entity] ? Math.round(s.attributes.brightness / 2.55) : null;
         const label = na ? 'onbereikbaar' : isOn ? (bri != null ? `aan · ${bri}%` : 'aan') : 'uit';
-        return `<button class="lt press${isOn ? ' on' : ''}${this._pendingLight[entity] ? ' pend' : ''}" data-act="light" data-entity="${entity}"${na ? ' disabled' : ''}>
+        return `<button class="glass lt press${isOn ? ' on' : ''}${this._pendingLight[entity] ? ' pend' : ''}" data-act="light" data-entity="${entity}"${na ? ' disabled' : ''}>
           <span class="i"><ha-icon icon="mdi:${isOn ? 'lightbulb-on' : 'lightbulb-outline'}"></ha-icon></span>
-          <span style="min-width:0"><b>${name}</b><small>${label}</small></span></button>`;
+          <b>${name}</b><small>${label}</small></button>`;
       })
       .join('');
     this._set('lights', this._el.lgrid, tiles);
     this._el.lcount.textContent = on ? `${on} aan` : 'alles uit';
+    this._badge('lampen', on > 0, on, '#ffc46b');
   }
 }
 

@@ -11,12 +11,28 @@ The cast view (`thuis`) is one full-screen custom element with its own design, n
 1024x600 and scaled to fit other screens. In a normal browser it sits under the HA header; add `?kiosk` to the URL
 to make it full screen (on the Nest it always is).
 
-| Part | Shows |
+It is a looping carousel of full-screen slides, one subject per slide in large type so it reads from across the
+room. The bar at the bottom shows the time and has a button per slide; swipe left / right to step through the loop.
+It advances on its own every 20 s (a line under the active button counts down) and pauses for 90 s after any touch.
+The buttons carry live badges: energy state colour, a blue dot when rain is coming, the number of rooms heating and
+of lights on.
+
+| Slide | Shows |
 |---|---|
 | Background | Live sky: colour follows the real sun elevation (computed from the home location), a glow where the sun is, stars at night, drifting clouds by weather condition, falling rain when the radar says it rains now. Dimmed a bit after 21:00 |
-| Left | Clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset, rain next 2 hours (Buienradar, from KNMI radar; tap for details), solar harvest today vs forecast and tomorrow's forecast |
-| Centre | Energy: status line ("We leveren terug", "Stroom van het net"), energy score (tap for the breakdown), animated solar / grid / house flow with usage now, thin 12 h graph of solar vs house power, today's totals |
-| Right | All Tado rooms: current and target temperature with - / +, heating glow, hot water; lights (tap toggles); scenes Relax / Gedimd / Fel / Uit |
+| Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours and solar today vs forecast (tap to open that slide) |
+| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score with its two parts |
+| Vandaag | 12 h graph of solar vs house power, today's totals (usage, import, export, gas, self consumption, cost) |
+| Regen | Rain next 2 hours (Buienradar, from KNMI radar). Skipped by the auto-rotation when it stays dry |
+| Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
+| Lampen | Lights (tap toggles) and scenes Relax / Gedimd / Fel / Uit. Not in the auto-rotation |
+
+Carousel options in the card config: `rotate` (seconds per slide, 0 = off), `resume_after` (seconds after a touch),
+`rotate_slides` (which slides the auto-rotation visits), `start` (first slide).
+
+The gas graphs come from the recorder's long-term statistics of `sensor.gas_meter_gas_consumption` (hourly and daily
+`change`), reloaded every 15 minutes. The P1 gas meter reports about once an hour, so the newest hour can lag; today's
+bar uses the live `sensor.gas_today` counter instead.
 
 Entities, rooms, lights and scenes are defaults in the top of the JS file and can be overridden per key in the
 card config. The earlier version built from HA cards is kept as view `kaarten` (`/nest-hub/kaarten`).
@@ -59,7 +75,7 @@ Average of two parts (price timing alone on days without solar):
 - **Slim getimed** (price timing): average dynamic price paid for grid import today vs the average of today's hours
   so far. 50 = average, 100 = everything at the cheapest hour, 0 = far above average.
 
-Shown as a leaf badge in the energy part; tap it for the two parts. Daily counters are `utility_meter`s in the package;
+Shown on the Energie slide with its two parts. Daily counters are `utility_meter`s in the package;
 they started 2026-11-21, so that day is partial.
 
 ### Start it yourself
