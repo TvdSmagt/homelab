@@ -271,6 +271,24 @@ script:
           entity_id: media_player.eetkamer_display
           dashboard_path: nest-hub
           view_path: thuis
+  # Close the cast app and cast again: the Nest loads the dashboard from scratch, e.g. after a new
+  # version of homelab-ambient-panel.js or a change in dashboards/nest_hub.yaml.
+  nest_hub_restart_dashboard:
+    alias: "Nest Hub: herstart dashboard"
+    icon: mdi:restart
+    mode: single
+    sequence:
+      - action: media_player.turn_off # quits the running cast app
+        target:
+          entity_id: media_player.eetkamer_display
+      - wait_template: "{{ state_attr('media_player.eetkamer_display', 'app_id') != 'A078F6B0' }}"
+        timeout: "00:00:15"
+      - delay: "00:00:03"
+      - action: cast.show_lovelace_view
+        data:
+          entity_id: media_player.eetkamer_display
+          dashboard_path: nest-hub
+          view_path: thuis
 
 # Fire system_log_event for warnings, used by nest_hub_cast_reconnect_loop.
 system_log:

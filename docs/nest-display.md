@@ -69,8 +69,7 @@ loop* catches that warning (via `system_log: fire_event`), reloads the cast inte
 No dependencies (the font, Outfit, comes from Google Fonts, with Roboto as fallback). `homeassistant/www` is mounted
 at `/config/www` and the files are loaded as `/local/<file>?v=N` (`lovelace: resource_mode: yaml` + `resources:` in
 `configuration.yaml`). **Bump `?v=` after changing a file**, otherwise the Nest keeps the cached copy. A new
-resource needs a Home Assistant restart. To get a new version on the Nest right away: quit the cast app, then cast
-again (script below) or wait for the 5-minute automation.
+resource needs a Home Assistant restart. To get a new version on the Nest right away: run the script *Nest Hub: herstart dashboard* (below).
 
 ### Burn-in
 
@@ -99,6 +98,9 @@ for the graph on the Vandaag slide. It needs at least 12 hours of data in the wi
 
 Script **Nest Hub: toon dashboard** (`script.nest_hub_show_dashboard`) casts it immediately, e.g. from a
 Home Assistant Companion app widget on the phone.
+
+Script **Nest Hub: herstart dashboard** (`script.nest_hub_restart_dashboard`) closes the cast app and casts again, so the
+Nest loads everything fresh: use it after a new version of the JS file or a change in `dashboards/nest_hub.yaml`.
 
 ## Requirement: HTTPS
 
