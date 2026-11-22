@@ -13,7 +13,7 @@ to make it full screen (on the Nest it always is).
 
 It is a looping carousel of full-screen slides, one subject per slide in large type so it reads from across the
 room. The bar at the bottom shows the time and has a button per slide; swipe left / right to step through the loop.
-It advances on its own every 20 s (a line under the active button counts down) and pauses for 90 s after any touch.
+It advances on its own every 60 s (a line under the active button counts down) and pauses for 90 s after any touch.
 The buttons carry live badges: energy state colour, a blue dot when rain is coming, the number of rooms heating and
 of lights on.
 
@@ -27,7 +27,7 @@ of lights on.
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
 | Lampen | Lights (tap toggles) and scenes Relax / Gedimd / Fel / Uit. Not in the auto-rotation |
 
-Carousel options in the card config: `rotate` (seconds per slide, 0 = off), `resume_after` (seconds after a touch),
+Carousel options in the card config (set in `dashboards/nest_hub.yaml`, view `thuis`): `rotate` (seconds per slide, 0 = off), `resume_after` (seconds after a touch),
 `rotate_slides` (which slides the auto-rotation visits), `start` (first slide).
 
 **Phases:** the P1 power values (`power_consumption` / `power_production`) are summed per direction over the three
