@@ -21,7 +21,7 @@ of lights on.
 |---|---|
 | Background | Live sky: colour follows the real sun elevation (computed from the home location), a glow where the sun is, stars at night, drifting clouds by weather condition, falling rain when the radar says it rains now. Dimmed a bit after 21:00 |
 | Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours and solar today vs forecast (tap to open that slide) |
-| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score with its two parts |
+| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score with its two parts, today's cost per hour (00-24, fixed contract: electricity, gas, export credit below the line) with the dynamic contract total for comparison |
 | Vandaag | 12 h graph of solar vs house power, today's totals (usage, import, export, gas, self consumption, cost) |
 | Regen | Rain next 2 hours (Buienradar, from KNMI radar). Skipped by the auto-rotation when it stays dry |
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
@@ -29,6 +29,15 @@ of lights on.
 
 Carousel options in the card config: `rotate` (seconds per slide, 0 = off), `resume_after` (seconds after a touch),
 `rotate_slides` (which slides the auto-rotation visits), `start` (first slide).
+
+**Phases:** the P1 power values (`power_consumption` / `power_production`) are summed per direction over the three
+phases, so one phase can import while another exports and both are non-zero at once. The meter registers (what the
+supplier bills, and what the daily counters and the energy score use) net the phases. The panel therefore shows the
+net flow: import minus export. `sensor.house_power` already does the same.
+
+The cost graph comes from the 5-minute statistics of `sensor.fixed_contract_total_cost` and
+`sensor.fixed_contract_gas_cost` (electricity = total - gas, so it includes supply costs and the export credit),
+reloaded every 5 minutes. The big number is `sensor.cost_today`.
 
 The gas graphs come from the recorder's long-term statistics of `sensor.gas_meter_gas_consumption` (hourly and daily
 `change`), reloaded every 15 minutes. The P1 gas meter reports about once an hour, so the newest hour can lag; today's

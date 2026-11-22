@@ -9,7 +9,8 @@
 //   background   live sky: colour follows the real sun elevation, glow where the sun is, stars at night,
 //                drifting clouds by weather condition, falling rain when the radar says it rains now
 //   Nu           big clock, weather now (animated icon, moon phase, wind in Bft), day arc, rain and solar summary
-//   Energie      animated solar / grid / house flow and the energy score with its two parts
+//   Energie      animated solar / grid / house flow, the energy score with its two parts, and today's cost per hour
+//                (electricity and gas, fixed contract) with the dynamic contract for comparison
 //   Vandaag      12-hour graph of solar vs house power and today's totals
 //   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
@@ -38,7 +39,10 @@ const DEFAULTS = {
   gas_today: 'sensor.gas_today',
   gas: 'sensor.gas_meter_gas_consumption', // meter reading (m³), its long-term statistics feed the gas graph
   gas_price: 1.51574, // EUR per m³ incl. VAT, fixed contract (packages/energy_contract.yaml)
-  cost_today: 'sensor.fixed_cost_today',
+  cost_today: 'sensor.cost_today', // daily utility meter on the fixed contract total
+  cost_total: 'sensor.fixed_contract_total_cost', // running totals (EUR), their statistics feed the cost graph
+  cost_gas: 'sensor.fixed_contract_gas_cost',
+  cost_dynamic: 'sensor.dynamic_contract_total_cost',
   forecast_today: 'sensor.solar_forecast_today',
   forecast_tomorrow: 'sensor.solar_forecast_tomorrow',
   weather: 'weather.forecast_home',
@@ -377,9 +381,10 @@ canvas.on { opacity: 1; }
 .ebadge ha-icon { --mdc-icon-size: 32px; }
 .etitle { font-size: 34px; font-weight: 400; line-height: 1.1; color: var(--accent); transition: color 1s; }
 .esub { font-size: 19px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ebody { flex: 1; display: grid; grid-template-columns: 528px 1fr; gap: 20px; min-height: 0; align-items: center; }
-.fwrap { position: relative; width: 528px; height: 378px; }
-.flow { position: absolute; left: 0; top: 0; width: 352px; height: 252px; transform: scale(1.5); transform-origin: 0 0; }
+.ebody { flex: 1; display: grid; grid-template-columns: 458px 1fr; gap: 18px; min-height: 0; align-items: center; }
+.fwrap { position: relative; width: 458px; height: 328px; }
+.flow { position: absolute; left: 0; top: 0; width: 352px; height: 252px; transform: scale(1.3); transform-origin: 0 0; }
+.eright { align-self: stretch; display: flex; flex-direction: column; gap: 12px; min-height: 0; margin-bottom: 8px; }
 .flow svg { position: absolute; inset: 0; overflow: visible; }
 .ln { fill: none; stroke-width: 3; opacity: .14; transition: opacity 1s; }
 .ln.on { opacity: .32; }
@@ -401,15 +406,29 @@ canvas.on { opacity: 1; }
 .mid { position: absolute; left: 176px; top: 102px; transform: translateX(-50%); text-align: center; }
 .mid b { display: block; font-size: 36px; font-weight: 300; line-height: 1; letter-spacing: -.01em; }
 .mid span { font-size: 11.5px; color: var(--muted); }
-.escore { align-self: stretch; margin: 6px 0 10px; padding: 20px 24px; display: flex; flex-direction: column; text-align: left; }
-.sbig { display: flex; align-items: center; gap: 8px; color: var(--sc); margin-top: 8px; transition: color 1s; }
-.sbig ha-icon { --mdc-icon-size: 48px; }
-.sbig b { font-size: 92px; font-weight: 300; line-height: .95; letter-spacing: -.03em; }
-.sbig span { font-size: 22px; color: var(--muted); align-self: flex-end; margin-bottom: 12px; }
-.escore p { font-size: 16.5px; color: var(--muted); line-height: 1.4; margin: 10px 0 0; }
-.prows { margin-top: auto; display: flex; flex-direction: column; gap: 16px; }
-.prow > div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; }
-.prow b { font-size: 22px; font-weight: 500; }
+.escore { padding: 14px 20px 14px; text-align: left; flex: none; }
+.srow { display: flex; align-items: center; gap: 20px; margin-top: 4px; }
+.sbig { display: flex; align-items: center; gap: 6px; color: var(--sc); transition: color 1s; flex: none; }
+.sbig ha-icon { --mdc-icon-size: 36px; }
+.sbig b { font-size: 64px; font-weight: 300; line-height: 1; letter-spacing: -.03em; }
+.prows { flex: 1; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.prow > div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-size: 16px; white-space: nowrap; }
+.prow b { font-size: 18px; font-weight: 500; }
+.prow .hbar { margin-top: 4px; height: 7px; }
+.ecost { flex: 1; min-height: 0; padding: 14px 20px 10px; display: flex; flex-direction: column; text-align: left; }
+.cbig { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; margin-top: 2px; }
+.cbig b { font-size: 40px; font-weight: 300; line-height: 1.05; }
+.cbig span { font-size: 16px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.cbars { flex: 1; min-height: 0; display: flex; gap: 2px; margin-top: 8px; position: relative; }
+.cbars u { position: absolute; left: 0; right: 0; border-top: 1px solid var(--faint); text-decoration: none; }
+.cbars > div { flex: 1; position: relative; }
+.cbars i { position: absolute; left: 0; right: 0; min-height: 1px; }
+.cbars i.g { background: var(--heat); border-radius: 0 0 1px 1px; }
+.cbars i.e { background: var(--grid); border-radius: 3px 3px 0 0; }
+.cbars i.x { background: var(--export); border-radius: 0 0 3px 3px; }
+.cbars i.f { top: auto; bottom: 0; height: 2px; background: rgba(255, 255, 255, .1); }
+.ckey { display: flex; gap: 12px; font-size: 14px; color: var(--muted); }
+.ckey i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; }
 
 /* ── Vandaag ── */
 .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin: 0 6px 0 4px; }
@@ -534,6 +553,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._update();
     if (!this._histAt || Date.now() - this._histAt > 5 * 60 * 1000) this._loadHistory();
     if (!this._gasAt || Date.now() - this._gasAt > 15 * 60 * 1000) this._loadGas();
+    if (!this._costAt || Date.now() - this._costAt > 5 * 60 * 1000) this._loadCost();
   }
 
   connectedCallback() {
@@ -650,15 +670,25 @@ class HomelabAmbientPanel extends HTMLElement {
               <div class="val" id="v-home" style="left:296px;top:224px;transform:translateX(-50%);text-align:center"></div>
               <div class="mid"><b id="m-house">–</b><span>verbruik nu</span></div>
             </div></div>
-            <button class="glass escore press" id="score" data-act="info" data-entity="${c.score}">
-              <div class="label">Energiescore vandaag</div>
-              <div class="sbig"><ha-icon id="sicon" icon="mdi:leaf"></ha-icon><b id="snum">–</b><span>/ 100</span></div>
-              <p>Eigen zonnestroom zelf gebruiken, en van het net halen als het goedkoop is.</p>
-              <div class="prows">
-                <div class="prow"><div><span>Eigen zon zelf gebruikt</span><b id="p-sc">–</b></div><div class="hbar"><i id="pb-sc"></i></div></div>
-                <div class="prow"><div><span>Slim getimed (prijs)</span><b id="p-pr">–</b></div><div class="hbar"><i id="pb-pr"></i></div></div>
-              </div>
-            </button>
+            <div class="eright">
+              <button class="glass escore press" id="score" data-act="info" data-entity="${c.score}">
+                <div class="label">Energiescore vandaag</div>
+                <div class="srow">
+                  <div class="sbig"><ha-icon id="sicon" icon="mdi:leaf"></ha-icon><b id="snum">–</b></div>
+                  <div class="prows">
+                    <div class="prow"><div><span>Eigen zon zelf gebruikt</span><b id="p-sc">–</b></div><div class="hbar"><i id="pb-sc"></i></div></div>
+                    <div class="prow"><div><span>Slim getimed (prijs)</span><b id="p-pr">–</b></div><div class="hbar"><i id="pb-pr"></i></div></div>
+                  </div>
+                </div>
+              </button>
+              <button class="glass ecost press" data-act="info" data-entity="${c.cost_today}">
+                <div class="gtop"><span class="label">Kosten vandaag</span>
+                  <span class="ckey"><span><i style="background:var(--grid)"></i>stroom</span><span><i style="background:var(--heat)"></i>gas</span><span><i style="background:var(--export)"></i>terug</span></span></div>
+                <div class="cbig"><b id="cost-tot">–</b><span id="cost-sub"></span></div>
+                <div class="cbars" id="cost-bars"></div>
+                <div class="ghx"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+              </button>
+            </div>
           </div>`)}
 
         ${slide('vandaag', `
@@ -1019,6 +1049,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._rain();
     this._harvest();
     this._gasRender();
+    this._costRender();
     this._el.offline.classList.toggle('on', this._hass.connected === false);
   }
 
@@ -1277,8 +1308,11 @@ class HomelabAmbientPanel extends HTMLElement {
     const c = this._c;
     const e = this._el;
     const solar = Math.max(watts(h, c.solar) ?? 0, 0); // Grott is unavailable at night: 0 W
-    const imp = Math.max(watts(h, c.import) ?? 0, 0);
-    const exp = Math.max(watts(h, c.export) ?? 0, 0);
+    // The P1 values are summed per direction over the phases, so one phase can import while another exports.
+    // The meter registers (what the supplier bills) net the phases, so show the net flow.
+    const net = Math.max(watts(h, c.import) ?? 0, 0) - Math.max(watts(h, c.export) ?? 0, 0);
+    const imp = Math.max(net, 0);
+    const exp = Math.max(-net, 0);
     const house = Math.max(solar + imp - exp, 0);
     const solarToHouse = Math.max(solar - exp, 0);
     const share = house > 0 ? Math.min(100, Math.round((solarToHouse / house) * 100)) : 0;
@@ -1327,7 +1361,7 @@ class HomelabAmbientPanel extends HTMLElement {
     e.snum.textContent = score == null ? '–' : Math.round(score);
     const sicon = score == null || score < 45 ? 'mdi:leaf-off' : 'mdi:leaf';
     if (e.sicon.getAttribute('icon') !== sicon) e.sicon.setAttribute('icon', sicon);
-    e['p-sc'].textContent = sc == null ? 'nog geen zon' : `${Math.round(sc)}%`;
+    e['p-sc'].textContent = sc == null ? 'nog < 0,1 kWh' : `${Math.round(sc)}%`;
     e['p-pr'].textContent = pr == null ? 'nog te weinig' : `${Math.round(pr)}%`;
     e['pb-sc'].style.width = `${sc ?? 0}%`;
     e['pb-pr'].style.width = `${pr ?? 0}%`;
@@ -1488,6 +1522,75 @@ class HomelabAmbientPanel extends HTMLElement {
         return `<div class="${i === 6 ? 'now' : ''}"><em>${fmt(v, 1)}</em><i style="height:${Math.max(2, (v / dmax) * 100).toFixed(0)}%"></i><span>${day}</span></div>`;
       })
       .join('');
+  }
+
+  // Cost per hour today from the 5-minute statistics of the running cost totals (fixed contract), so the
+  // current hour is included. Electricity = total - gas: import, supply costs, minus the export credit.
+  async _loadCost() {
+    if (this._costLoading || !this._hass.callWS) return;
+    this._costLoading = true;
+    this._costAt = Date.now();
+    try {
+      const c = this._c;
+      const t0 = new Date();
+      t0.setHours(0, 0, 0, 0);
+      const ids = [c.cost_total, c.cost_gas, c.cost_dynamic];
+      const res = await this._hass.callWS({
+        type: 'recorder/statistics_during_period',
+        start_time: t0.toISOString(),
+        statistic_ids: ids,
+        period: '5minute',
+        types: ['change'],
+      });
+      const [tot, gas, dyn] = ids.map((id) => {
+        const out = new Array(24).fill(0);
+        for (const r of res[id] || []) {
+          const ms = typeof r.start === 'number' ? r.start : Date.parse(r.start);
+          const i = new Date(ms).getHours();
+          if (ms >= t0.getTime() && typeof r.change === 'number') out[i] += r.change;
+        }
+        return out;
+      });
+      this._costData = { tot, gas, dyn, hour: new Date().getHours() };
+      this._cache.cost = null;
+      this._costRender();
+    } catch (err) {
+      console.warn('homelab-ambient-panel: cost statistics failed', err);
+    } finally {
+      this._costLoading = false;
+    }
+  }
+
+  _costRender() {
+    const total = num(this._hass, this._c.cost_today);
+    const d = this._costData;
+    const key = `${total}|${d ? d.tot.join() + d.gas.join() + d.hour : ''}`;
+    if (key === this._cache.cost) return;
+    this._cache.cost = key;
+    const e = this._el;
+    e['cost-tot'].textContent = total == null ? '–' : `€ ${fmt(total, 2)}`;
+    if (!d) return;
+    const sum = (a) => a.reduce((x, y) => x + y, 0);
+    const gasT = sum(d.gas);
+    const dynT = sum(d.dyn);
+    const elT = sum(d.tot) - gasT;
+    e['cost-sub'].textContent = `stroom € ${fmt(elT, 2)} · gas € ${fmt(gasT, 2)} · dynamisch € ${fmt(dynT, 2)}`;
+    const el = d.tot.map((v, i) => v - d.gas[i]);
+    const gas = d.gas.map((v) => Math.max(v, 0));
+    const maxPos = Math.max(0.1, ...gas.map((g, i) => g + Math.max(el[i], 0)));
+    const maxNeg = Math.max(0, ...el.map((v) => -v));
+    const span = maxPos + maxNeg;
+    const pct = (v) => (v / span) * 100;
+    const zero = pct(maxPos);
+    const cols = el.map((v, i) => {
+      if (i > d.hour) return '<div><i class="f"></i></div>';
+      const g = pct(gas[i]);
+      let html = gas[i] > 0 ? `<i class="g" style="top:${(zero - g).toFixed(1)}%;height:${g.toFixed(1)}%"></i>` : '';
+      if (v > 0) html += `<i class="e" style="top:${(zero - g - pct(v)).toFixed(1)}%;height:${pct(v).toFixed(1)}%"></i>`;
+      else if (v < 0) html += `<i class="x" style="top:${zero.toFixed(1)}%;height:${pct(-v).toFixed(1)}%"></i>`;
+      return `<div>${html}</div>`;
+    });
+    e['cost-bars'].innerHTML = `<u style="top:${zero.toFixed(1)}%"></u>${cols.join('')}`;
   }
 
   _rooms() {
