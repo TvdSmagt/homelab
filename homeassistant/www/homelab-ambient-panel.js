@@ -8,9 +8,10 @@
 //
 //   background   live sky: colour follows the real sun elevation, glow where the sun is, stars at night,
 //                drifting clouds by weather condition, falling rain when the radar says it rains now
-//   Nu           big clock, weather now (animated icon, moon phase, wind in Bft), day arc, rain and solar summary
-//   Energie      animated solar / grid / house flow, the energy score with its two parts, and today's cost per hour
-//                (electricity and gas, fixed contract) with the dynamic contract for comparison
+//   Nu           big clock, weather now (animated icon, moon phase, wind in Bft), day arc, tiles for rain, solar,
+//                and the energy score of the last 24 hours as a graph
+//   Energie      animated solar / grid / house flow, the energy score (last 24 h) with its two parts, and the
+//                dynamic electricity price per hour from 07:00 to 07:00 with the cheapest block for the dishwasher
 //   Vandaag      12-hour graph of solar vs house power and today's totals
 //   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
@@ -40,9 +41,20 @@ const DEFAULTS = {
   gas: 'sensor.gas_meter_gas_consumption', // meter reading (m³), its long-term statistics feed the gas graph
   gas_price: 1.51574, // EUR per m³ incl. VAT, fixed contract (packages/energy_contract.yaml)
   cost_today: 'sensor.cost_today', // daily utility meter on the fixed contract total
-  cost_total: 'sensor.fixed_contract_total_cost', // running totals (EUR), their statistics feed the cost graph
-  cost_gas: 'sensor.fixed_contract_gas_cost',
-  cost_dynamic: 'sensor.dynamic_contract_total_cost',
+  // Dynamic electricity prices: EnergyZero market prices (yesterday - tomorrow) and the all-in formula of
+  // sensor.dynamic_electricity_price in packages/energy_contract.yaml: (market + markup) x VAT + energy tax.
+  prices: 'sensor.energyzero_electricity_prices',
+  price_now: 'sensor.dynamic_electricity_price',
+  price_markup: 0.02,
+  price_vat: 1.21,
+  price_tax: 0.11085,
+  price_day_start: 7, // the price graph runs from this hour to the same hour the next day
+  cheap_hours: 3, // length of the cheapest block marked in the price graph (a dishwasher run)
+  // Energy score over the last 24 hours, from the recorder's 5-minute statistics of these totals.
+  solar_total: 'sensor.6fz463602f_generated_energy_total',
+  import_total: 'sensor.electricity_import_total',
+  export_total: 'sensor.electricity_export_total',
+  import_cost_dynamic: 'sensor.dynamic_contract_import_cost',
   forecast_today: 'sensor.solar_forecast_today',
   forecast_tomorrow: 'sensor.solar_forecast_tomorrow',
   weather: 'weather.forecast_home',
@@ -362,14 +374,22 @@ canvas.on { opacity: 1; }
 .arc .dot { fill: #ffd56b; } .arc .glw { fill: rgba(255, 205, 90, .22); }
 .arcl { display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
 .arcl ha-icon { --mdc-icon-size: 19px; vertical-align: -3px; margin-right: 3px; }
-.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; height: 124px; flex: none; }
-.tile { padding: 16px 18px 16px 20px; display: flex; align-items: center; gap: 16px; min-width: 0; text-align: left; }
-.tile .ti { --mdc-icon-size: 46px; color: var(--ti, var(--rain)); flex: none; }
+.strip { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; height: 124px; flex: none; }
+.tile { padding: 14px 16px 14px 18px; display: flex; align-items: center; gap: 14px; min-width: 0; text-align: left; }
+.tile .ti { --mdc-icon-size: 40px; color: var(--ti, var(--rain)); flex: none; }
 .tile .tt { flex: 1; min-width: 0; }
-.tile b { display: block; font-size: 25px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile b em { font-style: normal; font-size: 18px; font-weight: 400; color: var(--muted); }
-.tile small { display: block; font-size: 17px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile .chev { --mdc-icon-size: 30px; color: var(--muted); flex: none; opacity: .7; }
+.tile b { display: block; font-size: 24px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile b em { font-style: normal; font-size: 17px; font-weight: 400; color: var(--muted); }
+.tile small { display: block; font-size: 16.5px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stile { flex-direction: column; align-items: stretch; gap: 2px; padding: 12px 16px 10px 18px; }
+.stile .slab { font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.stile .srow2 { flex: 1; display: flex; align-items: center; gap: 12px; min-height: 0; }
+.stile .srow2 b { font-size: 46px; font-weight: 300; line-height: 1; color: var(--sc, var(--muted)); flex: none; letter-spacing: -.02em; }
+.stile svg { flex: 1; height: 100%; min-width: 0; overflow: visible; }
+.spark-l { fill: none; stroke: var(--sc, var(--muted)); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.spark-a { fill: var(--sc, var(--muted)); opacity: .14; }
+.spark-r { stroke: rgba(255, 255, 255, .18); stroke-width: 1; stroke-dasharray: 3 4; }
+.spark-d { fill: var(--sc, var(--muted)); }
 .hbar { height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .1); overflow: hidden; margin-top: 8px; }
 .hbar i { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, #ff9a3c, #ffd56b);
   transition: width 1.5s ease; }
@@ -415,20 +435,22 @@ canvas.on { opacity: 1; }
 .prow > div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-size: 16px; white-space: nowrap; }
 .prow b { font-size: 18px; font-weight: 500; }
 .prow .hbar { margin-top: 4px; height: 7px; }
-.ecost { flex: 1; min-height: 0; padding: 14px 20px 10px; display: flex; flex-direction: column; text-align: left; }
-.cbig { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; margin-top: 2px; }
-.cbig b { font-size: 40px; font-weight: 300; line-height: 1.05; }
-.cbig span { font-size: 16px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
-.cbars { flex: 1; min-height: 0; display: flex; gap: 2px; margin-top: 8px; position: relative; }
-.cbars u { position: absolute; left: 0; right: 0; border-top: 1px solid var(--faint); text-decoration: none; }
-.cbars > div { flex: 1; position: relative; }
-.cbars i { position: absolute; left: 0; right: 0; min-height: 1px; }
-.cbars i.g { background: var(--heat); border-radius: 0 0 1px 1px; }
-.cbars i.e { background: var(--grid); border-radius: 3px 3px 0 0; }
-.cbars i.x { background: var(--export); border-radius: 0 0 3px 3px; }
-.cbars i.f { top: auto; bottom: 0; height: 2px; background: rgba(255, 255, 255, .1); }
-.ckey { display: flex; gap: 12px; font-size: 14px; color: var(--muted); }
-.ckey i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; }
+.eprice { flex: 1; min-height: 0; padding: 14px 20px 10px; display: flex; flex-direction: column; text-align: left; }
+.pbig { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; margin-top: 2px; }
+.pbig b { font-size: 40px; font-weight: 300; line-height: 1.05; color: var(--pc, var(--text)); }
+.pbig span { font-size: 16px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.pcheap { color: var(--export); }
+.pbars { flex: 1; min-height: 0; display: flex; align-items: flex-end; gap: 2px; margin-top: 8px; position: relative;
+  border-bottom: 1px solid var(--faint); }
+.pbars i { flex: 1; min-height: 3px; border-radius: 3px 3px 0 0; background: var(--bc); position: relative; z-index: 1;
+  transition: height 1s ease; }
+.pbars i.past { opacity: .3; }
+.pbars i.now { box-shadow: 0 0 0 2px #fff; }
+.pbars i.na { background: rgba(255, 255, 255, .08); height: 3px !important; }
+.pbars .cheap { position: absolute; top: -4px; bottom: 0; border-radius: 8px 8px 0 0; background: rgba(63, 214, 143, .13);
+  border: 1px solid rgba(63, 214, 143, .45); border-bottom: 0; }
+.pbars .cheap span { position: absolute; left: 50%; top: 3px; transform: translateX(-50%); font-size: 13px; font-weight: 600;
+  color: var(--export); white-space: nowrap; }
 
 /* ── Vandaag ── */
 .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin: 0 6px 0 4px; }
@@ -553,7 +575,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._update();
     if (!this._histAt || Date.now() - this._histAt > 5 * 60 * 1000) this._loadHistory();
     if (!this._gasAt || Date.now() - this._gasAt > 15 * 60 * 1000) this._loadGas();
-    if (!this._costAt || Date.now() - this._costAt > 5 * 60 * 1000) this._loadCost();
+    if (!this._scoreAt || Date.now() - this._scoreAt > 5 * 60 * 1000) this._loadScore();
   }
 
   connectedCallback() {
@@ -636,14 +658,17 @@ class HomelabAmbientPanel extends HTMLElement {
           <div class="strip">
             <button class="glass tile press" id="nr" data-act="go" data-go="regen">
               <ha-icon class="ti" id="nr-icon" icon="mdi:weather-partly-cloudy"></ha-icon>
-              <div class="tt"><b id="nr-title">Regenverwachting</b><small id="nr-sub"></small></div>
-              <ha-icon class="chev" icon="mdi:chevron-right"></ha-icon>
+              <div class="tt"><b id="nr-title">Regen</b><small id="nr-sub"></small></div>
             </button>
             <button class="glass tile press" data-act="go" data-go="vandaag" style="--ti:var(--solar)">
               <ha-icon class="ti" icon="mdi:solar-power-variant"></ha-icon>
               <div class="tt"><b><span id="hnow">–</span> <em id="hfc"></em></b>
                 <div class="hbar"><i id="hbar"></i></div><small id="hnext"></small></div>
-              <ha-icon class="chev" icon="mdi:chevron-right"></ha-icon>
+            </button>
+            <button class="glass tile stile press" id="ns" data-act="go" data-go="energie">
+              <div class="slab">Energiescore · 24 uur</div>
+              <div class="srow2"><b id="ns-num">–</b>
+                <svg id="ns-spark" viewBox="0 0 200 60" preserveAspectRatio="none"></svg></div>
             </button>
           </div>`)}
 
@@ -672,7 +697,7 @@ class HomelabAmbientPanel extends HTMLElement {
             </div></div>
             <div class="eright">
               <button class="glass escore press" id="score" data-act="info" data-entity="${c.score}">
-                <div class="label">Energiescore vandaag</div>
+                <div class="label">Energiescore · laatste 24 uur</div>
                 <div class="srow">
                   <div class="sbig"><ha-icon id="sicon" icon="mdi:leaf"></ha-icon><b id="snum">–</b></div>
                   <div class="prows">
@@ -681,12 +706,11 @@ class HomelabAmbientPanel extends HTMLElement {
                   </div>
                 </div>
               </button>
-              <button class="glass ecost press" data-act="info" data-entity="${c.cost_today}">
-                <div class="gtop"><span class="label">Kosten vandaag</span>
-                  <span class="ckey"><span><i style="background:var(--grid)"></i>stroom</span><span><i style="background:var(--heat)"></i>gas</span><span><i style="background:var(--export)"></i>terug</span></span></div>
-                <div class="cbig"><b id="cost-tot">–</b><span id="cost-sub"></span></div>
-                <div class="cbars" id="cost-bars"></div>
-                <div class="ghx"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+              <button class="glass eprice press" data-act="info" data-entity="${c.price_now}">
+                <div class="gtop"><span class="label">Stroomprijs dynamisch</span><span class="label pcheap" id="pr-cheap"></span></div>
+                <div class="pbig"><b id="pr-now">–</b><span id="pr-sub"></span></div>
+                <div class="pbars" id="pr-bars"></div>
+                <div class="ghx" id="pr-x"></div>
               </button>
             </div>
           </div>`)}
@@ -1049,7 +1073,8 @@ class HomelabAmbientPanel extends HTMLElement {
     this._rain();
     this._harvest();
     this._gasRender();
-    this._costRender();
+    this._priceRender();
+    this._scoreRender();
     this._el.offline.classList.toggle('on', this._hass.connected === false);
   }
 
@@ -1168,20 +1193,20 @@ class HomelabAmbientPanel extends HTMLElement {
     if (key === this._cache.rain) return;
     this._cache.rain = key;
     const e = this._el;
-    const head = (icon, title, sub, color) => {
+    const head = (icon, title, sub, color, short = title, shortSub = sub) => {
       e.ricon.setAttribute('icon', icon);
       e['nr-icon'].setAttribute('icon', icon);
       e.rtitle.textContent = title;
-      e['nr-title'].textContent = title;
+      e['nr-title'].textContent = short;
       e.rsub.textContent = sub;
-      e['nr-sub'].textContent = sub;
+      e['nr-sub'].textContent = shortSub;
       e['s-regen'].style.setProperty('--ri', color);
       e.nr.style.setProperty('--ti', color);
     };
     const [start, list] = (raw || '').split('|');
     const mm = (list || '').split(',').map(parseFloat).filter((v) => !Number.isNaN(v));
     if (!start || mm.length === 0) {
-      head('mdi:weather-cloudy-alert', 'Regenverwachting', 'geen gegevens van Buienradar', 'var(--muted)');
+      head('mdi:weather-cloudy-alert', 'Regenverwachting', 'geen gegevens van Buienradar', 'var(--muted)', 'Regen', 'geen gegevens');
       e.bars.innerHTML = '';
       e.raxis.innerHTML = '';
       this._dry = true;
@@ -1198,21 +1223,24 @@ class HomelabAmbientPanel extends HTMLElement {
     const kind = (v) => (v >= 5 ? 'zware regen' : v >= 1 ? 'regen' : 'lichte regen');
     const peak = Math.max(...mm);
     const first = mm.findIndex(wet);
-    let icon, title, sub;
+    let icon, title, sub, short, shortSub;
     if (first === -1) {
       icon = 'mdi:umbrella-closed-variant'; title = 'Droog de komende 2 uur';
       sub = `tot ${at(mm.length)} geen regen verwacht`;
+      short = 'Droog'; shortSub = `tot ${at(mm.length)}`;
     } else if (first === 0) {
       const dry = mm.findIndex((v) => !wet(v));
       icon = 'mdi:weather-pouring';
       title = dry === -1 ? `${cap(kind(peak))} de komende 2 uur` : `Het regent, droog rond ${at(dry)}`;
       sub = `tot ${fmt(peak, 1)} mm per uur`;
+      short = 'Het regent'; shortSub = dry === -1 ? 'nog 2 uur' : `droog rond ${at(dry)}`;
     } else {
       icon = 'mdi:weather-rainy';
       title = `${cap(kind(peak))} om ${at(first)}`;
       sub = `over ${first * 5} minuten, tot ${fmt(peak, 1)} mm/u`;
+      short = `Regen ${at(first)}`; shortSub = `over ${first * 5} min, ${kind(peak)}`;
     }
-    head(icon, title, sub, first === -1 ? 'var(--solar)' : 'var(--rain)');
+    head(icon, title, sub, first === -1 ? 'var(--solar)' : 'var(--rain)', short, shortSub);
     this._dry = first === -1;
     this._badge('regen', first !== -1, null, 'var(--rain)');
     // Square-root scale up to 5 mm/h: drizzle stays visible and a shower does not flatten the rest.
@@ -1284,7 +1312,7 @@ class HomelabAmbientPanel extends HTMLElement {
     let next = '';
     if (tm != null) {
       const more = fc != null && tm > fc * 1.25 ? ' · meer zon' : fc != null && tm < fc * 0.75 ? ' · minder zon' : '';
-      next = `Morgen ${fmt(tm)} kWh verwacht${more}`;
+      next = `Morgen ${fmt(tm)} kWh${more}`;
     }
     e.hnext.textContent = next;
   }
@@ -1354,9 +1382,10 @@ class HomelabAmbientPanel extends HTMLElement {
     e.esub.textContent = sub;
     this._badge('energie', true, null, accent);
 
-    const score = num(h, c.score);
-    const sc = num(h, c.self_consumption);
-    const pr = num(h, c.price);
+    const s24 = this._score24;
+    const score = s24 ? s24.score : num(h, c.score);
+    const sc = s24 ? s24.sc : num(h, c.self_consumption);
+    const pr = s24 ? s24.pr : num(h, c.price);
     e.score.style.setProperty('--sc', scoreColor(score));
     e.snum.textContent = score == null ? '–' : Math.round(score);
     const sicon = score == null || score < 45 ? 'mdi:leaf-off' : 'mdi:leaf';
@@ -1524,73 +1553,190 @@ class HomelabAmbientPanel extends HTMLElement {
       .join('');
   }
 
-  // Cost per hour today from the 5-minute statistics of the running cost totals (fixed contract), so the
-  // current hour is included. Electricity = total - gas: import, supply costs, minus the export credit.
-  async _loadCost() {
-    if (this._costLoading || !this._hass.callWS) return;
-    this._costLoading = true;
-    this._costAt = Date.now();
+  // Dynamic all-in price per hour from the EnergyZero list (market prices yesterday - tomorrow, UTC hours).
+  _hourPrices() {
+    const c = this._c;
+    const s = this._hass.states[c.prices];
+    const out = new Map();
+    for (const p of (s && s.attributes.Prices) || []) {
+      const t = Date.parse(p.readingDate);
+      if (!Number.isNaN(t) && typeof p.price === 'number') out.set(t, (p.price + c.price_markup) * c.price_vat + c.price_tax);
+    }
+    return out;
+  }
+
+  // Price per hour from 07:00 to 07:00 (price_day_start), the current hour outlined, past hours dimmed, and the
+  // cheapest block of `cheap_hours` from now on: when to start the dishwasher. Tomorrow's prices arrive around 13:00.
+  _priceRender() {
+    const c = this._c;
+    const now = new Date();
+    const t0 = new Date(now);
+    t0.setHours(c.price_day_start, 0, 0, 0);
+    if (now < t0) t0.setDate(t0.getDate() - 1);
+    const hours = [];
+    for (let i = 0; i < 24; i++) {
+      const d = new Date(t0);
+      d.setHours(t0.getHours() + i);
+      hours.push(d.getTime());
+    }
+    const cur = hours.findIndex((t, i) => now.getTime() >= t && (i === 23 || now.getTime() < hours[i + 1]));
+    const ps = this._hass.states[c.prices];
+    const key = `${t0.getTime()}|${cur}|${ps ? ps.last_updated : ''}`;
+    if (key === this._cache.price) return;
+    this._cache.price = key;
+    const map = this._hourPrices();
+    const vals = hours.map((t) => (map.has(t) ? map.get(t) : null));
+    const known = vals.filter((v) => v != null);
+    const e = this._el;
+    if (!known.length) {
+      e['pr-now'].textContent = '–';
+      e['pr-sub'].textContent = 'geen prijzen van EnergyZero';
+      e['pr-bars'].innerHTML = '';
+      return;
+    }
+    const lo = Math.min(...known);
+    const hi = Math.max(...known);
+    const avg = known.reduce((a, b) => a + b, 0) / known.length;
+    // Colour from green (cheapest of the window) via yellow to red (most expensive).
+    const col = (v) => {
+      const f = hi - lo < 0.005 ? 0.5 : (v - lo) / (hi - lo);
+      return `hsl(${Math.round(140 - f * 140)}, 70%, 55%)`;
+    };
+    // Cheapest block of n hours that has not started yet (the current hour counts).
+    const n = c.cheap_hours;
+    let best = -1;
+    let bestAvg = Infinity;
+    for (let i = Math.max(cur, 0); i + n <= 24; i++) {
+      const w = vals.slice(i, i + n);
+      if (w.some((v) => v == null)) continue;
+      const a = w.reduce((x, y) => x + y, 0) / n;
+      if (a < bestAvg - 1e-9) { bestAvg = a; best = i; }
+    }
+    const pNow = cur >= 0 ? vals[cur] : null;
+    e['pr-now'].textContent = pNow == null ? '–' : `€ ${fmt(pNow, 2)}`;
+    e['pr-now'].parentElement.style.setProperty('--pc', pNow == null ? 'var(--text)' : col(pNow));
+    e['pr-sub'].textContent = `per kWh nu · gem. € ${fmt(avg, 2)} · ${fmt(lo, 2)}–${fmt(hi, 2)}`;
+    const hh = (t) => String(new Date(t).getHours()).padStart(2, '0');
+    e['pr-cheap'].textContent = best < 0 ? '' : best === cur ? `nu goedkoopst · € ${fmt(bestAvg, 2)}` : `goedkoopst ${hh(hours[best])}–${hh(hours[best] + n * 3600000)} uur`;
+    const floor = Math.max(0, lo - (hi - lo) * 0.6); // bars start a bit below the cheapest hour, so differences show
+    const bars = vals.map((v, i) => {
+      if (v == null) return '<i class="na"></i>';
+      const h = 8 + ((v - floor) / (hi - floor || 1)) * 92;
+      return `<i class="${i < cur ? 'past' : ''}${i === cur ? ' now' : ''}" style="height:${h.toFixed(0)}%;--bc:${col(v)}"></i>`;
+    });
+    const band = best < 0 ? '' : `<div class="cheap" style="left:calc(${(best / 24) * 100}% - 2px);width:calc(${(n / 24) * 100}% + 2px)"><span>vaatwasser</span></div>`;
+    e['pr-bars'].innerHTML = band + bars.join('');
+    e['pr-x'].innerHTML = [0, 6, 12, 18].map((i) => `<span>${hh(hours[i])}</span>`).join('') + `<span>${hh(hours[0])}</span>`;
+  }
+
+  // Energy score over the last 24 hours instead of since midnight, and the same score at every hour of the last
+  // 24 hours for the graph on the Nu slide. Same two parts as the HA sensors in packages/nest_display.yaml:
+  //   self consumption  (solar - export) / solar, when solar >= 0.1 kWh
+  //   price timing      50 + 50 x (average price - paid per kWh) / (average - cheapest hour), paid = dynamic import
+  //                     cost / import; prices are the dynamic all-in hour prices in the window
+  // From the 5-minute statistics, bucketed per hour, so the current hour counts too.
+  async _loadScore() {
+    if (this._scoreLoading || !this._hass.callWS) return;
+    this._scoreLoading = true;
+    this._scoreAt = Date.now();
     try {
       const c = this._c;
-      const t0 = new Date();
-      t0.setHours(0, 0, 0, 0);
-      const ids = [c.cost_total, c.cost_gas, c.cost_dynamic];
-      const res = await this._hass.callWS({
-        type: 'recorder/statistics_during_period',
-        start_time: t0.toISOString(),
-        statistic_ids: ids,
-        period: '5minute',
-        types: ['change'],
-      });
-      const [tot, gas, dyn] = ids.map((id) => {
-        const out = new Array(24).fill(0);
-        for (const r of res[id] || []) {
-          const ms = typeof r.start === 'number' ? r.start : Date.parse(r.start);
-          const i = new Date(ms).getHours();
-          if (ms >= t0.getTime() && typeof r.change === 'number') out[i] += r.change;
+      const hNow = new Date();
+      hNow.setMinutes(0, 0, 0);
+      const B = 48; // buckets: 47 full hours and the current one
+      const H0 = hNow.getTime() - (B - 1) * 3600000;
+      const ids = [c.solar_total, c.import_total, c.export_total, c.import_cost_dynamic];
+      const [sums, means] = await Promise.all([
+        this._hass.callWS({ type: 'recorder/statistics_during_period', start_time: new Date(H0).toISOString(),
+          statistic_ids: ids, period: '5minute', types: ['change'] }),
+        this._hass.callWS({ type: 'recorder/statistics_during_period', start_time: new Date(H0).toISOString(),
+          statistic_ids: [c.price_now], period: 'hour', types: ['mean'] }),
+      ]);
+      const idx = (r) => Math.floor(((typeof r.start === 'number' ? r.start : Date.parse(r.start)) - H0) / 3600000);
+      const bucket = (id) => {
+        const out = new Array(B).fill(null);
+        for (const r of sums[id] || []) {
+          const i = idx(r);
+          if (i >= 0 && i < B && typeof r.change === 'number') out[i] = (out[i] || 0) + r.change;
         }
         return out;
-      });
-      this._costData = { tot, gas, dyn, hour: new Date().getHours() };
-      this._cache.cost = null;
-      this._costRender();
+      };
+      const [solar, imp, exp, cost] = ids.map(bucket);
+      const price = new Array(B).fill(null);
+      for (const r of means[c.price_now] || []) {
+        const i = idx(r);
+        if (i >= 0 && i < B && typeof r.mean === 'number') price[i] = r.mean;
+      }
+      const list = this._hourPrices();
+      for (let i = 0; i < B; i++) if (list.has(H0 + i * 3600000)) price[i] = list.get(H0 + i * 3600000);
+      const win = (end) => {
+        let so = 0, ex = 0, im = 0, co = 0, n = 0;
+        const ps = [];
+        for (let i = end - 23; i <= end; i++) {
+          if (i < 0 || imp[i] == null) continue;
+          n += 1;
+          so += Math.max(solar[i] || 0, 0);
+          ex += Math.max(exp[i] || 0, 0);
+          im += Math.max(imp[i], 0);
+          co += Math.max(cost[i] || 0, 0);
+          if (price[i] != null) ps.push(price[i]);
+        }
+        if (n < 6) return null; // not enough history yet
+        const sc = so >= 0.1 ? clamp(((so - ex) / so) * 100, 0, 100) : null;
+        let pr = null;
+        if (im >= 0.2 && ps.length) {
+          const avg = ps.reduce((a, b) => a + b, 0) / ps.length;
+          pr = clamp(50 + (50 * (avg - co / im)) / Math.max(avg - Math.min(...ps), 0.02), 0, 100);
+        }
+        const parts = [sc, pr].filter((v) => v != null);
+        return { sc, pr, score: parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null, hours: n };
+      };
+      const points = [];
+      for (let end = B - 24; end < B; end++) {
+        const w = win(end);
+        points.push(w ? w.score : null);
+      }
+      this._score24 = win(B - 1);
+      this._scorePts = points;
+      this._cache.score = null;
+      this._scoreRender();
+      this._energy();
     } catch (err) {
-      console.warn('homelab-ambient-panel: cost statistics failed', err);
+      console.warn('homelab-ambient-panel: score statistics failed', err);
     } finally {
-      this._costLoading = false;
+      this._scoreLoading = false;
     }
   }
 
-  _costRender() {
-    const total = num(this._hass, this._c.cost_today);
-    const d = this._costData;
-    const key = `${total}|${d ? d.tot.join() + d.gas.join() + d.hour : ''}`;
-    if (key === this._cache.cost) return;
-    this._cache.cost = key;
+  // Score tile on the Nu slide: the number now and a line of the 24-hour score at each hour of the last day.
+  _scoreRender() {
+    const s = this._score24;
+    const score = s ? s.score : num(this._hass, this._c.score);
+    const pts = this._scorePts || [];
+    const key = `${score}|${pts.join()}`;
+    if (key === this._cache.score) return;
+    this._cache.score = key;
     const e = this._el;
-    e['cost-tot'].textContent = total == null ? '–' : `€ ${fmt(total, 2)}`;
-    if (!d) return;
-    const sum = (a) => a.reduce((x, y) => x + y, 0);
-    const gasT = sum(d.gas);
-    const dynT = sum(d.dyn);
-    const elT = sum(d.tot) - gasT;
-    e['cost-sub'].textContent = `stroom € ${fmt(elT, 2)} · gas € ${fmt(gasT, 2)} · dynamisch € ${fmt(dynT, 2)}`;
-    const el = d.tot.map((v, i) => v - d.gas[i]);
-    const gas = d.gas.map((v) => Math.max(v, 0));
-    const maxPos = Math.max(0.1, ...gas.map((g, i) => g + Math.max(el[i], 0)));
-    const maxNeg = Math.max(0, ...el.map((v) => -v));
-    const span = maxPos + maxNeg;
-    const pct = (v) => (v / span) * 100;
-    const zero = pct(maxPos);
-    const cols = el.map((v, i) => {
-      if (i > d.hour) return '<div><i class="f"></i></div>';
-      const g = pct(gas[i]);
-      let html = gas[i] > 0 ? `<i class="g" style="top:${(zero - g).toFixed(1)}%;height:${g.toFixed(1)}%"></i>` : '';
-      if (v > 0) html += `<i class="e" style="top:${(zero - g - pct(v)).toFixed(1)}%;height:${pct(v).toFixed(1)}%"></i>`;
-      else if (v < 0) html += `<i class="x" style="top:${zero.toFixed(1)}%;height:${pct(-v).toFixed(1)}%"></i>`;
-      return `<div>${html}</div>`;
-    });
-    e['cost-bars'].innerHTML = `<u style="top:${zero.toFixed(1)}%"></u>${cols.join('')}`;
+    e.ns.style.setProperty('--sc', scoreColor(score));
+    e['ns-num'].textContent = score == null ? '–' : Math.round(score);
+    const W2 = 200;
+    const x = (i) => ((i / Math.max(pts.length - 1, 1)) * W2).toFixed(1);
+    const y = (v) => (56 - (v / 100) * 52).toFixed(1);
+    let line = '';
+    let area = '';
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) {
+        const d = run.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i)} ${y(v)}`).join('');
+        line += `<path class="spark-l" d="${d}" vector-effect="non-scaling-stroke"/>`;
+        area += `<path class="spark-a" d="${d}L${x(run[run.length - 1][0])} 56L${x(run[0][0])} 56Z"/>`;
+      }
+      run = [];
+    };
+    pts.forEach((v, i) => (v == null ? flush() : run.push([i, v])));
+    flush();
+    const last = pts.length && pts[pts.length - 1] != null ? `<circle class="spark-d" cx="${x(pts.length - 1)}" cy="${y(pts[pts.length - 1])}" r="3.5"/>` : '';
+    e['ns-spark'].innerHTML = `<line class="spark-r" x1="0" x2="${W2}" y1="${y(50)}" y2="${y(50)}" vector-effect="non-scaling-stroke"/>${area}${line}${last}`;
   }
 
   _rooms() {

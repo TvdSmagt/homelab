@@ -20,8 +20,8 @@ of lights on.
 | Slide | Shows |
 |---|---|
 | Background | Live sky: colour follows the real sun elevation (computed from the home location), a glow where the sun is, stars at night, drifting clouds by weather condition, falling rain when the radar says it rains now. Dimmed a bit after 21:00 |
-| Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours and solar today vs forecast (tap to open that slide) |
-| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score with its two parts, today's cost per hour (00-24, fixed contract: electricity, gas, export credit below the line) with the dynamic contract total for comparison |
+| Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours, solar today vs forecast, and the energy score of the last 24 hours with a graph of that score over the last day (tap a tile to open its slide) |
+| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour from 07:00 to 07:00 (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *vaatwasser* |
 | Vandaag | 12 h graph of solar vs house power, today's totals (usage, import, export, gas, self consumption, cost) |
 | Regen | Rain next 2 hours (Buienradar, from KNMI radar). Skipped by the auto-rotation when it stays dry |
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
@@ -35,9 +35,10 @@ phases, so one phase can import while another exports and both are non-zero at o
 supplier bills, and what the daily counters and the energy score use) net the phases. The panel therefore shows the
 net flow: import minus export. `sensor.house_power` already does the same.
 
-The cost graph comes from the 5-minute statistics of `sensor.fixed_contract_total_cost` and
-`sensor.fixed_contract_gas_cost` (electricity = total - gas, so it includes supply costs and the export credit),
-reloaded every 5 minutes. The big number is `sensor.cost_today`.
+The price graph uses the EnergyZero market prices (`sensor.energyzero_electricity_prices`, yesterday to tomorrow)
+with the same all-in formula as `sensor.dynamic_electricity_price`: (market + 0.020) x 1.21 + 0.11085 per kWh
+(`price_markup`, `price_vat`, `price_tax` in the card config). Tomorrow's prices are published around 13:00, so in the
+morning the night hours are still empty. `price_day_start` and `cheap_hours` set the window and the block length.
 
 The gas graphs come from the recorder's long-term statistics of `sensor.gas_meter_gas_consumption` (hourly and daily
 `change`), reloaded every 15 minutes. The P1 gas meter reports about once an hour, so the newest hour can lag; today's
@@ -77,15 +78,19 @@ The screen is off from 22:30 to 07:00, and the layout shifts by up to 5 px every
 the Cast receiver, detected by `cast.home-assistant.io` / `CrKey`, or with `?kiosk`). The clock, sky and animations
 change all the time anyway.
 
-### Energy score (0-100, per day)
+### Energy score (0-100, last 24 hours)
 
-Average of two parts (price timing alone on days without solar):
-- **Eigen zon benut** (self consumption): share of today's solar used in the house instead of exported.
-- **Slim getimed** (price timing): average dynamic price paid for grid import today vs the average of today's hours
-  so far. 50 = average, 100 = everything at the cheapest hour, 0 = far above average.
+Average of two parts (price timing alone when there was less than 0.1 kWh of solar):
+- **Eigen zon zelf gebruikt** (self consumption): share of the solar used in the house instead of exported.
+- **Slim getimed** (price timing): average dynamic price paid for grid import vs the average of the hour prices in the
+  window. 50 = average, 100 = everything at the cheapest hour, 0 = far above average.
 
-Shown on the Energie slide with its two parts. Daily counters are `utility_meter`s in the package;
-they started 2026-11-21, so that day is partial.
+The panel computes it over a rolling 24 hours from the recorder's 5-minute statistics of the solar, import and export
+totals and `sensor.dynamic_contract_import_cost`, bucketed per hour (prices from the EnergyZero list, older hours from
+the statistics of `sensor.dynamic_electricity_price`), every 5 minutes. It does the same for each of the last 24 hours
+for the graph on the Nu slide. Until those statistics load it shows the HA sensors, which count from midnight:
+`sensor.energy_score_today`, `sensor.self_consumption_today`, `sensor.price_timing_score_today` (package
+`nest_display.yaml`, also used by the `kaarten` view). Statistics start 2026-11-21 17:00, so the first graph is short.
 
 ### Start it yourself
 
