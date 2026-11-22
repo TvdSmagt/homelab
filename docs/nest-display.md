@@ -23,6 +23,7 @@ of lights on.
 | Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours and solar today vs forecast (tap to open that slide) |
 | Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour, today 00:00-24:00 and from 18:00 until 18:00 tomorrow (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *goedkoop* |
 | Vandaag | 12 h graph of solar vs house power, the energy score of the last 24 hours with a graph of that score at each hour of the last day, today's totals (usage, import, export, gas, cost) |
+| Verleden | The last 7 days. **Vast vs dynamisch**: how much cheaper or dearer the dynamic contract would have been since 2026-11-21 (live from `sensor.fixed_contract_total_cost` / `sensor.dynamic_contract_total_cost`, package `energy_contract.yaml`), the monthly estimate, and the difference per day. **Energiescore per dag**: the score per calendar day with both parts (needs 12 hours of P1 data, today 3). **Verbruik per dag**: solar, grid import and export (kWh), gas (m³); today from the live daily counters. All from the hourly long-term statistics, so it fills up as history grows (P1 since 2026-11-21) |
 | Regen | Rain next 2 hours (Buienradar, from KNMI radar). Skipped by the auto-rotation when it stays dry |
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
 | Lampen | Lights (tap toggles) and scenes Relax / Gedimd / Fel / Uit. Not in the auto-rotation |
@@ -68,8 +69,19 @@ loop* catches that warning (via `system_log: fire_event`), reloads the cast inte
 
 No dependencies (the font, Outfit, comes from Google Fonts, with Roboto as fallback). `homeassistant/www` is mounted
 at `/config/www` and the files are loaded as `/local/<file>?v=N` (`lovelace: resource_mode: yaml` + `resources:` in
-`configuration.yaml`). **Bump `?v=` after changing a file**, otherwise the Nest keeps the cached copy. A new
-resource needs a Home Assistant restart. To get a new version on the Nest right away: run the script *Nest Hub: herstart dashboard* (below).
+`configuration.yaml`). The Nest caches them, so every change needs a new `?v=`. **Deploy with
+`scripts/deploy-panel.sh`**: it sets `?v=` to a hash of each changed file, reloads the resources
+(`lovelace.reload_resources`) and restarts the dashboard on the Nest Hub. That needs `HA_TOKEN` in `.env` (long-lived
+access token of an admin user, *profile → Security*); without it the script restarts Home Assistant instead and you run
+the script *Nest Hub: herstart dashboard* (below) yourself. `--restart` forces a restart. A new resource (a new file)
+still has to be added to `configuration.yaml` by hand.
+
+### Preview without Home Assistant
+
+[`scripts/panel-preview/index.html`](../scripts/panel-preview/index.html) loads the panel with mock states and
+statistics. Open it in a browser (`#energie`, `#verleden`, ... picks the slide), or make 1024 x 600 screenshots of
+all slides with `scripts/panel-preview.sh` (Chromium, headless; `scripts/panel-preview.sh verleden` for one). When
+the panel starts reading a new entity or statistic, add it to the mock.
 
 ### Burn-in
 
@@ -95,6 +107,7 @@ the statistics of `sensor.dynamic_electricity_price`), every 5 minutes. It does 
 for the graph on the Vandaag slide (total, and both parts as thin lines). It needs at least 12 hours of data in the window. Until those statistics load it shows the HA sensors, which count from midnight:
 `sensor.energy_score_today`, `sensor.self_consumption_today`, `sensor.price_timing_score_today` (package
 `nest_display.yaml`, also used by the `kaarten` view). Statistics start 2026-11-21 17:00, so the first graph is short.
+The Verleden slide uses the same two parts per calendar day, from the hourly statistics.
 
 ### Start it yourself
 

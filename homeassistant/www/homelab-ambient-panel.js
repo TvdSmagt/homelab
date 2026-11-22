@@ -13,6 +13,8 @@
 //                dynamic electricity price per hour (today, from 18:00 until 18:00 tomorrow) with the cheapest
 //                block marked
 //   Vandaag      12-hour graph of solar vs house power, the energy score of the last 24 hours as a graph, today's totals
+//   Verleden     the last 7 days: fixed vs dynamic contract (since the start and per day), the energy score per
+//                day with its two parts, and usage per day (solar, import, export, gas)
 //   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
 //                per hour (last 24 h) and per day (last 7 days) from the recorder's long-term statistics
@@ -54,6 +56,11 @@ const DEFAULTS = {
   solar_total: 'sensor.6fz463602f_generated_energy_total',
   import_total: 'sensor.electricity_import_total',
   export_total: 'sensor.electricity_export_total',
+  // Verleden: cost on both contracts (packages/energy_contract.yaml, counted from contract_since), days shown.
+  fixed_total: 'sensor.fixed_contract_total_cost',
+  dynamic_total: 'sensor.dynamic_contract_total_cost',
+  contract_since: '2026-11-21',
+  past_days: 7,
   forecast_today: 'sensor.solar_forecast_today',
   forecast_tomorrow: 'sensor.solar_forecast_tomorrow',
   weather: 'weather.forecast_home',
@@ -84,7 +91,7 @@ const DEFAULTS = {
   start: 'nu', // slide shown first
   rotate: 20, // seconds per slide, 0 = no auto-rotation
   resume_after: 90, // seconds without a touch before the rotation continues
-  rotate_slides: ['nu', 'energie', 'vandaag', 'regen', 'klimaat'], // Lampen only by button or swipe
+  rotate_slides: ['nu', 'energie', 'vandaag', 'verleden', 'regen', 'klimaat'], // Lampen only by button or swipe
 };
 
 // ── Small helpers ───────────────────────────────────────────────────────────────────────────────
@@ -106,6 +113,19 @@ function watts(hass, id) {
   if (v == null) return null;
   return hass.states[id].attributes.unit_of_measurement === 'kW' ? v * 1000 : v;
 }
+// Energy score parts, see _loadScore. Self consumption from solar and export (kWh); price timing from the import
+// (kWh), what it cost at the hour prices (EUR) and the hour prices in the period.
+const selfUse = (so, ex) => (so >= 0.1 ? clamp(((so - ex) / so) * 100, 0, 100) : null);
+function priceTiming(kwh, cost, prices) {
+  if (kwh < 0.2 || !prices.length) return null;
+  const hi = Math.max(...prices);
+  const lo = Math.min(...prices);
+  return clamp(50 + (100 * ((hi + lo) / 2 - cost / kwh)) / Math.max(hi - lo, 0.03), 0, 100);
+}
+const avgOf = (vals) => {
+  const v = vals.filter((x) => x != null);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
 const scoreColor = (v) => (v == null ? 'var(--muted)' : v >= 70 ? 'var(--export)' : v >= 45 ? '#f0b030' : '#ff6b6b');
 
 // ── Sun and moon (after SunCalc, Vladimir Agafonkin, BSD) ─────────────────────────────────────────
@@ -243,6 +263,7 @@ const SLIDES = [
   { id: 'nu', name: 'Nu', icon: 'mdi:clock-outline', ac: '#ffd56b' },
   { id: 'energie', name: 'Energie', icon: 'mdi:lightning-bolt', ac: '#3fd68f' },
   { id: 'vandaag', name: 'Vandaag', icon: 'mdi:chart-areaspline', ac: '#5aaeff' },
+  { id: 'verleden', name: 'Verleden', icon: 'mdi:history', ac: '#c3a6ff' },
   { id: 'regen', name: 'Regen', icon: 'mdi:weather-pouring', ac: '#6fb8ff' },
   { id: 'klimaat', name: 'Klimaat', icon: 'mdi:thermostat', ac: '#ff8a4c' },
   { id: 'lampen', name: 'Lampen', icon: 'mdi:lightbulb-group', ac: '#ffc46b' },
@@ -473,6 +494,42 @@ canvas.on { opacity: 1; }
 .chip b { font-size: 24px; font-weight: 400; display: block; white-space: nowrap; line-height: 1.15; }
 .chip span { font-size: 15px; color: var(--muted); display: block; white-space: nowrap; }
 
+/* ── Verleden ── */
+.ptop { display: grid; grid-template-columns: 372px 1fr; gap: 14px; height: 218px; flex: none; }
+.pcard { padding: 14px 20px 10px; display: flex; flex-direction: column; text-align: left; min-width: 0; min-height: 0; }
+.pcard .vleg { margin: 0; }
+.cbig { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; white-space: nowrap; }
+.cbig b { font-size: 44px; font-weight: 300; line-height: 1.05; color: var(--cc, var(--text)); }
+.cbig span { font-size: 18px; color: var(--cc, var(--muted)); }
+.csub { font-size: 15px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cdays { flex: 1; min-height: 0; display: flex; gap: 4px; margin-top: 6px; }
+.cdays > div, .sdays > div { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.cz { flex: 1; width: 100%; position: relative; }
+.cz::before { content: ''; position: absolute; left: -2px; right: -2px; top: 50%; border-top: 1px solid var(--faint); }
+.cz i { position: absolute; left: 20%; right: 20%; min-height: 2px; background: var(--bc); transition: height 1s ease; }
+.cz i.up { bottom: 50%; border-radius: 4px 4px 0 0; }
+.cz i.dn { top: 50%; border-radius: 0 0 4px 4px; }
+.cdays em, .sdays em { font-style: normal; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.cdays span, .sdays span, .ufoot span { font-size: 14px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
+.cdays .now span, .sdays .now span, .ufoot .now { color: var(--text); font-weight: 500; }
+.sdays { flex: 1; min-height: 0; display: flex; gap: 10px; margin-top: 8px; }
+.sdays b { font-size: 23px; font-weight: 400; line-height: 1.1; color: var(--sc); }
+.sbars { flex: 1; min-height: 0; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px;
+  border-bottom: 1px solid var(--faint); margin-top: 3px; }
+.sbars i { width: 22%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height 1s ease; }
+.sbars .t { width: 40%; background: var(--sc); }
+.sbars .s { background: var(--solar); opacity: .8; }
+.sbars .p { background: var(--grid); opacity: .8; }
+.puse { flex: 1; }
+.udays { flex: 1; min-height: 0; display: flex; gap: 16px; margin-top: 6px; }
+.udays > div { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ubars { flex: 1; min-height: 0; display: flex; gap: 4px; border-bottom: 1px solid var(--faint); }
+.ubars > div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
+.ubars em { font-style: normal; font-size: 12.5px; color: var(--muted); white-space: nowrap; margin-bottom: 2px; }
+.ubars i { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--bc); transition: height 1s ease; }
+.ufoot { display: flex; justify-content: space-between; align-items: baseline; }
+.ufoot em { font-style: normal; font-size: 14px; color: var(--heat); white-space: nowrap; }
+
 /* ── Regen ── */
 .rhead { display: flex; align-items: center; gap: 18px; padding: 0 6px; flex: none; }
 .rhead ha-icon { --mdc-icon-size: 58px; color: var(--ri, var(--rain)); }
@@ -581,6 +638,7 @@ class HomelabAmbientPanel extends HTMLElement {
     if (!this._histAt || Date.now() - this._histAt > 5 * 60 * 1000) this._loadHistory();
     if (!this._gasAt || Date.now() - this._gasAt > 15 * 60 * 1000) this._loadGas();
     if (!this._scoreAt || Date.now() - this._scoreAt > 5 * 60 * 1000) this._loadScore();
+    if (!this._pastAt || Date.now() - this._pastAt > 15 * 60 * 1000) this._loadPast();
   }
 
   connectedCallback() {
@@ -734,6 +792,28 @@ class HomelabAmbientPanel extends HTMLElement {
             <div class="vsg"><div class="vleg"><span><i style="background:var(--sc)"></i>totaal</span><span><i style="background:var(--solar)"></i>zon zelf gebruikt</span><span><i style="background:var(--grid)"></i>slim getimed</span></div><svg id="vs-spark" viewBox="0 0 200 60" preserveAspectRatio="none"></svg><div class="ghx" id="vs-x"></div></div>
           </button>
           <div class="chips" id="chips"></div>`)}
+
+        ${slide('verleden', `
+          <div class="shead"><h2>Verleden</h2><span id="past-sub">laatste ${c.past_days} dagen</span></div>
+          <div class="ptop">
+            <button class="glass pcard press" id="con-card" data-act="info" data-entity="${c.dynamic_total}">
+              <span class="label">Vast vs dynamisch</span>
+              <div class="cbig"><b id="con-big">–</b><span id="con-what"></span></div>
+              <div class="csub" id="con-sub"></div>
+              <div class="csub" id="con-sub2"></div>
+              <div class="cdays" id="con-days"></div>
+            </button>
+            <div class="glass pcard">
+              <div class="gtop"><span class="label">Energiescore per dag</span>
+                <span class="vleg"><span><i style="background:var(--muted)"></i>totaal</span><span><i style="background:var(--solar)"></i>zon zelf gebruikt</span><span><i style="background:var(--grid)"></i>slim getimed</span></span></div>
+              <div class="sdays" id="past-score"></div>
+            </div>
+          </div>
+          <div class="glass pcard puse">
+            <div class="gtop"><span class="label">Verbruik per dag</span>
+              <span class="vleg"><span><i style="background:var(--solar)"></i>zon</span><span><i style="background:var(--grid)"></i>afgenomen</span><span><i style="background:var(--export)"></i>teruggeleverd</span><span style="color:var(--heat)">gas m³</span></span></div>
+            <div class="udays" id="past-use"></div>
+          </div>`)}
 
         ${slide('regen', `
           <div class="rhead"><ha-icon id="ricon" icon="mdi:weather-partly-cloudy"></ha-icon>
@@ -1079,6 +1159,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._gasRender();
     this._priceRender();
     this._scoreRender();
+    this._pastRender();
     this._el.offline.classList.toggle('on', this._hass.connected === false);
   }
 
@@ -1634,7 +1715,7 @@ class HomelabAmbientPanel extends HTMLElement {
   }
 
   // Energy score over the last 24 hours instead of since midnight, and the same score at every hour of the last
-  // 24 hours for the graph on the Nu slide. Same two parts as the HA sensors in packages/nest_display.yaml:
+  // 24 hours for the graph on the Vandaag slide. Same two parts as the HA sensors in packages/nest_display.yaml:
   //   self consumption  (solar - export) / solar, when solar >= 0.1 kWh
   //   price timing      50 + 100 x (midpoint - paid per kWh) / (dearest - cheapest hour, at least € 0.03), with
   //                     midpoint = (dearest + cheapest) / 2: 100 = all import at the cheapest hour, 0 = all at the
@@ -1690,16 +1771,9 @@ class HomelabAmbientPanel extends HTMLElement {
           co += Math.max(imp[i], 0) * price[i];
         }
         if (n < 12) return null; // not enough history yet
-        const sc = so >= 0.1 ? clamp(((so - ex) / so) * 100, 0, 100) : null;
-        let pr = null;
-        if (ip >= 0.2 && ps.length) {
-          const hi = Math.max(...ps);
-          const lo = Math.min(...ps);
-          pr = clamp(50 + (100 * ((hi + lo) / 2 - co / ip)) / Math.max(hi - lo, 0.03), 0, 100);
-        }
-        const parts = [sc, pr].filter((v) => v != null);
-        return { sc, pr, score: parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null, hours: n,
-          avg: ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : null, paid: ip > 0 ? co / ip : null };
+        const sc = selfUse(so, ex);
+        const pr = priceTiming(ip, co, ps);
+        return { sc, pr, score: avgOf([sc, pr]), hours: n, avg: avgOf(ps), paid: ip > 0 ? co / ip : null };
       };
       const points = [];
       for (let end = B - 24; end < B; end++) {
@@ -1756,6 +1830,130 @@ class HomelabAmbientPanel extends HTMLElement {
     };
     e['vs-spark'].innerHTML = `<line class="spark-r" x1="0" x2="${W2}" y1="${y(50)}" y2="${y(50)}" vector-effect="non-scaling-stroke"/>`
       + series('sc', 'spark-p sc', false) + series('pr', 'spark-p pr', false) + series('score', 'spark-l', true);
+  }
+
+  // Verleden: per day for the last `past_days` days (today included), from the recorder's hourly long-term
+  // statistics: usage, the energy score of that day (same two parts as above, over the calendar day) and the cost
+  // on both contracts. Hourly statistics are written after each hour, so today's numbers lag up to an hour; the
+  // usage of today comes from the live daily counters instead.
+  async _loadPast() {
+    if (this._pastLoading || !this._hass.callWS) return;
+    this._pastLoading = true;
+    this._pastAt = Date.now();
+    try {
+      const c = this._c;
+      const D = c.past_days;
+      const d0 = new Date();
+      d0.setHours(0, 0, 0, 0);
+      d0.setDate(d0.getDate() - (D - 1));
+      const starts = [];
+      for (let i = 0; i <= D; i++) {
+        const d = new Date(d0);
+        d.setDate(d0.getDate() + i);
+        starts.push(d.getTime());
+      }
+      const keys = { so: c.solar_total, im: c.import_total, ex: c.export_total, gas: c.gas, fx: c.fixed_total, dy: c.dynamic_total };
+      const ask = (ids, types) => this._hass.callWS({ type: 'recorder/statistics_during_period', start_time: d0.toISOString(),
+        statistic_ids: ids, period: 'hour', types });
+      const [sums, means] = await Promise.all([ask(Object.values(keys), ['change']), ask([c.price_now], ['mean'])]);
+      const ms = (r) => (typeof r.start === 'number' ? r.start : Date.parse(r.start));
+      const price = new Map();
+      for (const r of means[c.price_now] || []) if (typeof r.mean === 'number') price.set(ms(r), r.mean);
+      for (const [t, p] of this._hourPrices()) price.set(t, p);
+      const days = starts.slice(0, D).map((t) => ({ t, so: null, im: null, ex: null, gas: null, fx: null, dy: null, n: 0, ip: 0, co: 0, ps: [] }));
+      for (const [k, id] of Object.entries(keys)) {
+        for (const r of sums[id] || []) {
+          const t = ms(r);
+          const i = starts.findIndex((s, j) => j < D && t >= s && t < starts[j + 1]);
+          if (i < 0 || typeof r.change !== 'number') continue;
+          const d = days[i];
+          // Costs can go down (export credit); energy only up.
+          const v = k === 'fx' || k === 'dy' ? r.change : Math.max(r.change, 0);
+          d[k] = (d[k] || 0) + v;
+          if (k !== 'im') continue;
+          d.n += 1;
+          const p = price.get(t);
+          if (p == null) continue;
+          d.ps.push(p);
+          d.ip += v;
+          d.co += v * p;
+        }
+      }
+      this._past = days.map(({ ip, co, ps, ...d }) => ({ ...d, pr: priceTiming(ip, co, ps) }));
+      this._cache.past = null;
+      this._pastRender();
+    } catch (err) {
+      this._pastAt = Date.now() - 14.5 * 60 * 1000; // retry in 30 s
+      console.warn('homelab-ambient-panel: past statistics failed', err);
+    } finally {
+      this._pastLoading = false;
+    }
+  }
+
+  _pastRender() {
+    const h = this._hass;
+    const c = this._c;
+    const fxNow = num(h, c.fixed_total);
+    const dyNow = num(h, c.dynamic_total);
+    const live = { so: num(h, c.solar_today), im: num(h, c.import_today), ex: num(h, c.export_today), gas: num(h, c.gas_today) };
+    const key = JSON.stringify([this._past, fxNow, dyNow, live]);
+    if (key === this._cache.past) return;
+    this._cache.past = key;
+    const e = this._el;
+    const D = c.past_days;
+
+    // Contract: the total since the start from the live sensors, per day from the statistics.
+    const since = new Date(`${c.contract_since}T00:00`);
+    if (fxNow != null && dyNow != null) {
+      const diff = fxNow - dyNow;
+      const nd = (Date.now() - since.getTime()) / 86400000;
+      e['con-card'].style.setProperty('--cc', diff >= 0 ? 'var(--export)' : '#ff6b6b');
+      e['con-big'].textContent = `€ ${fmt(Math.abs(diff), 2)}`;
+      e['con-what'].textContent = diff >= 0 ? 'dynamisch goedkoper' : 'dynamisch duurder';
+      e['con-sub'].textContent = `vast € ${fmt(fxNow, 2)} · dynamisch € ${fmt(dyNow, 2)}`;
+      const from = Number.isNaN(nd) ? '' : `sinds ${since.toLocaleDateString(NL, { day: 'numeric', month: 'long' })}`;
+      e['con-sub2'].textContent = nd >= 1 ? `${from} · ≈ € ${fmt((Math.abs(diff) / nd) * 30.4, 0)} per maand` : from;
+    }
+    const p = this._past;
+    if (!p) return;
+    const wd = (t) => new Date(t).toLocaleDateString(NL, { weekday: 'short' }).replace('.', '');
+    const last = D - 1;
+    const diffs = p.map((d) => (d.fx != null && d.dy != null ? d.fx - d.dy : null));
+    const dmax = Math.max(0.2, ...diffs.map((v) => Math.abs(v || 0)));
+    e['con-days'].innerHTML = diffs
+      .map((v, i) => {
+        const bar = v == null ? '' : `<i class="${v >= 0 ? 'up' : 'dn'}" style="height:${Math.max(2, (Math.abs(v) / dmax) * 46).toFixed(0)}%;--bc:${v >= 0 ? 'var(--export)' : '#ff6b6b'}"></i>`;
+        const lbl = v == null ? '' : `${v >= 0 ? '+' : '−'}${fmt(Math.abs(v), 2)}`;
+        return `<div class="${i === last ? 'now' : ''}"><em>${lbl}</em><div class="cz">${bar}</div><span>${wd(p[i].t)}</span></div>`;
+      })
+      .join('');
+
+    // Score per day; today's self consumption from the live counters. A day needs 12 hours of data (today 3).
+    const pct = (v) => `${v == null ? 0 : Math.max(2, v).toFixed(0)}%`;
+    e['past-score'].innerHTML = p
+      .map((d, i) => {
+        const today = i === last;
+        const ok = d.n >= (today ? 3 : 12);
+        const sc = ok ? selfUse(today && live.so != null ? live.so : d.so || 0, today && live.ex != null ? live.ex : d.ex || 0) : null;
+        const pr = ok ? d.pr : null;
+        const s = avgOf([sc, pr]);
+        const bars = s == null ? '' : `<i class="t" style="height:${pct(s)}"></i><i class="s" style="height:${pct(sc)}"></i><i class="p" style="height:${pct(pr)}"></i>`;
+        return `<div class="${today ? 'now' : ''}" style="--sc:${scoreColor(s)}"><b>${s == null ? '–' : Math.round(s)}</b>
+          <div class="sbars">${bars}</div><span>${today ? 'vandaag' : wd(d.t)}</span></div>`;
+      })
+      .join('');
+
+    // Usage per day: solar, import, export on one kWh scale, gas as a number.
+    const use = p.map((d, i) => (i === last ? { ...d, ...Object.fromEntries(Object.entries(live).filter(([, v]) => v != null)) } : d));
+    const umax = Math.max(1, ...use.flatMap((d) => [d.so || 0, d.im || 0, d.ex || 0]));
+    const col = (v, bc) => `<div><em>${v == null ? '' : fmt(v, 1)}</em><i style="height:${v == null ? 0 : Math.max(2, (v / umax) * 80).toFixed(0)}%;--bc:${bc}"></i></div>`;
+    e['past-use'].innerHTML = use
+      .map((d, i) => {
+        const dt = new Date(d.t).toLocaleDateString(NL, { weekday: 'short', day: 'numeric' }).replace('.', '');
+        return `<div><div class="ubars">${col(d.so, 'var(--solar)')}${col(d.im, 'var(--grid)')}${col(d.ex, 'var(--export)')}</div>
+          <div class="ufoot"><span class="${i === last ? 'now' : ''}">${i === last ? 'vandaag' : dt}</span><em>${d.gas == null ? '' : fmt(d.gas, 1)}</em></div></div>`;
+      })
+      .join('');
   }
 
   _rooms() {

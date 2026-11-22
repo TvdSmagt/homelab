@@ -16,7 +16,7 @@ views:
         # of homelab-ambient-panel.js and can be overridden here the same way.
         rotate: 60          # seconds per slide, 0 = no auto-rotation
         resume_after: 90    # seconds after a touch before the rotation continues
-        rotate_slides: [nu, energie, vandaag, regen, klimaat]   # slides the auto-rotation visits
+        rotate_slides: [nu, energie, vandaag, verleden, regen, klimaat]   # slides the auto-rotation visits
 
   - title: Kaarten
     path: kaarten

@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- Preview of the Nest Hub panel (homeassistant/www/homelab-ambient-panel.js) with mock data, no Home Assistant
+     needed. Open in a browser (file://), pick the first slide with #energie etc. Screenshots of all slides:
+     scripts/panel-preview.sh. Mock states and statistics below; extend them when the panel reads new entities. -->
+<html><head><meta charset="utf-8"><title>Panel preview</title><style>html,body{margin:0;background:#000}</style>
+<script>
+// ha-icon stand-in: a rounded block in the icon's colour and size.
+customElements.define('ha-icon', class extends HTMLElement { connectedCallback(){ this.style.cssText+='width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);border-radius:30%;background:currentColor;opacity:.55'; } });
+window.onerror = (m, s, l) => { document.body.insertAdjacentHTML('beforeend', '<pre style="position:fixed;top:0;left:0;z-index:99;color:red;background:#fff">ERR ' + m + ' @' + l + '</pre>'); };
+</script>
+<script src="../../homeassistant/www/homelab-ambient-panel.js"></script></head><body>
+<script>
+const st = (state, attributes = {}) => ({ state: String(state), attributes });
+const states = {
+  'sensor.6fz463602f_pv_output_actual': st(1840, {unit_of_measurement:'W'}),
+  'sensor.electricity_meter_power_consumption': st(0.157, {unit_of_measurement:'kW'}),
+  'sensor.electricity_meter_power_production': st(0.057, {unit_of_measurement:'kW'}),
+  'sensor.energy_score_today': st(74), 'sensor.self_consumption_today': st(61), 'sensor.price_timing_score_today': st(82),
+  'sensor.solar_energy_today': st(4.2), 'sensor.grid_import_today': st(3.1), 'sensor.grid_export_today': st(1.4),
+  'sensor.gas_today': st(2.35), 'sensor.cost_today': st(3.94), 'sensor.solar_forecast_today': st(6.1), 'sensor.solar_forecast_tomorrow': st(8.3),
+  'weather.forecast_home': st('partlycloudy', {temperature: 11, apparent_temperature: 8, wind_speed: 22, wind_bearing: 240, humidity: 78}),
+  'sensor.rain_forecast': st('13:05|0,0,0,0,0.2,0.6,1.4,2.8,3.5,2.1,0.9,0.3,0,0,0,0,0,0,0,0,0,0,0,0'),
+  'sensor.koekelberg25_outdoor_temperature': st(10.4),
+  'water_heater.warm_water_warm_water': st('on'),
+  'climate.woonkamer_woonkamer': st('heat', {temperature: 20.5, current_temperature: 19.8, hvac_action: 'heating', current_humidity: 54}),
+  'climate.beneden_beneden': st('heat', {temperature: 19, current_temperature: 19.2, hvac_action: 'idle', current_humidity: 58}),
+  'climate.bibliotheek_bibliotheek': st('heat', {temperature: 18, current_temperature: 17.6, hvac_action: 'heating', current_humidity: 60}),
+  'climate.kleine_kamer_kleine_kamer': st('off', {temperature: null, current_temperature: 16.1, hvac_action: 'off'}),
+  'light.woonkamer_woonkamer': st('on', {brightness: 180}), 'light.keuken_keuken': st('off'),
+  'light.eetkamer_eetkamer': st('on', {brightness: 90}), 'light.bibliotheek_bibliotheek': st('unavailable'),
+};
+const now = Date.now()/1000;
+const hist = (f) => Array.from({length: 150}, (_, i) => ({ lu: now - 12*3600 + i*288, s: String(f(i/150)) }));
+const hass = { states, connected: true, config: {latitude: 52.37, longitude: 4.89},
+  callService: (...a) => console.log('svc', JSON.stringify(a)),
+  callWS: async (m) => {
+    if (m.type.startsWith('history')) return { 'sensor.6fz463602f_pv_output_actual': hist(t => Math.max(0, Math.sin((t-0.25)*Math.PI*1.6))*2600),
+                         'sensor.house_power': hist(t => 350 + 900*Math.abs(Math.sin(t*19)) * (t>0.6?1.5:0.6)) };
+    const step = {'5minute': 300e3, hour: 3600e3, day: 86400e3}[m.period];
+    const t0 = Date.parse(m.start_time); const n = Math.floor((Date.now() - t0) / step);
+    const f = {
+      'sensor.gas_meter_gas_consumption': (h, i) => m.period==='hour' ? Math.max(0,0.25*Math.sin(i/3.5)+0.12) : 2.5+Math.sin(i)*0.9,
+      'sensor.6fz463602f_generated_energy_total': (h) => (h>9&&h<16 ? 0.12 : 0),
+      'sensor.electricity_import_total': (h) => (h>9&&h<16 ? 0.005 : 0.03),
+      'sensor.electricity_export_total': (h) => (h>11&&h<14 ? 0.03 : 0),
+      'sensor.dynamic_contract_import_cost': (h) => (h>9&&h<16 ? 0.005 : 0.03) * (h<6 ? 0.22 : 0.30),
+      'sensor.dynamic_electricity_price': (h) => 0.25 + 0.06*Math.sin(h/24*6.28),
+      'sensor.fixed_contract_total_cost': (h, i) => 0.05 + (h>16&&h<21 ? 0.12 : 0.03) + (i%24<8 ? 0.06 : 0),
+      'sensor.dynamic_contract_total_cost': (h, i) => 0.05 + (h>16&&h<21 ? 0.16 : 0.02) + (i%24<8 ? 0.06 : 0) + 0.02*Math.sin(i/9),
+    };
+    const out = {};
+    for (const id of m.statistic_ids) out[id] = Array.from({length: n}, (_, i) => { const t = t0 + i*step, h = new Date(t).getHours(); const per = (m.period === 'hour' && /energy_total|import_total|export_total/.test(id) ? 12 : 1) * (0.6 + 0.4 * Math.sin(Math.floor(i * step / 86400e3) * 2.1) ** 2); // energy per hour, varies per day
+      const v = f[id] ? f[id](h, i) * (/price/.test(id) ? 1 : per) : 0; return {start: t, change: v, mean: v}; });
+    return out;
+  } };
+const day0 = new Date(); day0.setHours(0,0,0,0); day0.setDate(day0.getDate()-1);
+states['sensor.energyzero_electricity_prices'] = st(72, {Prices: Array.from({length: 62}, (_, i) => { const t = day0.getTime() + i*3600e3, h = new Date(t).getHours();
+  return {readingDate: new Date(t).toISOString().replace('.000',''), price: 0.09 + 0.05*Math.sin((h-4)/24*6.28) + (h>=17&&h<20?0.06:0) - (h>=12&&h<15?0.04:0)}; })});
+states['sensor.dynamic_electricity_price'] = st(0.27);
+states['sensor.fixed_contract_total_cost'] = st(8.23);
+states['sensor.dynamic_contract_total_cost'] = st(7.61);
+const p = document.createElement('homelab-ambient-panel');
+p.setConfig({ start: location.hash.slice(1) || 'nu', rotate: 0 }); // rotate 0: headless virtual time would run the autoplay
+p.style.height = '600px';
+document.body.appendChild(p);
+p.hass = hass;
+</script></body></html>
