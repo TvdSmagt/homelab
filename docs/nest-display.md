@@ -20,9 +20,9 @@ of lights on.
 | Slide | Shows |
 |---|---|
 | Background | Live sky: colour follows the real sun elevation (computed from the home location), a glow where the sun is, stars at night, drifting clouds by weather condition, falling rain when the radar says it rains now. Dimmed a bit after 21:00 |
-| Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours, solar today vs forecast, and the energy score of the last 24 hours with a graph of that score over the last day (tap a tile to open its slide) |
-| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour, today 00:00-24:00 and from 18:00 until 18:00 tomorrow (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *vaatwasser* |
-| Vandaag | 12 h graph of solar vs house power, today's totals (usage, import, export, gas, self consumption, cost) |
+| Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours and solar today vs forecast (tap to open that slide) |
+| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour, today 00:00-24:00 and from 18:00 until 18:00 tomorrow (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *goedkoop* |
+| Vandaag | 12 h graph of solar vs house power, the energy score of the last 24 hours with a graph of that score at each hour of the last day, today's totals (usage, import, export, gas, cost) |
 | Regen | Rain next 2 hours (Buienradar, from KNMI radar). Skipped by the auto-rotation when it stays dry |
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
 | Lampen | Lights (tap toggles) and scenes Relax / Gedimd / Fel / Uit. Not in the auto-rotation |
@@ -83,13 +83,15 @@ change all the time anyway.
 
 Average of two parts (price timing alone when there was less than 0.1 kWh of solar):
 - **Eigen zon zelf gebruikt** (self consumption): share of the solar used in the house instead of exported.
-- **Slim getimed** (price timing): average dynamic price paid for grid import vs the average of the hour prices in the
-  window. 50 = average, 100 = everything at the cheapest hour, 0 = far above average.
+- **Slim getimed** (price timing): 50 + 50 x (average hour price - paid per kWh) / (average - cheapest hour, at least
+  € 0.02). Paid per kWh = each hour's grid import x that hour's dynamic all-in price, divided by the total import.
+  50 = paid the average, 100 = everything at the cheapest hour, 0 = far above average. Not from the dynamic cost
+  counter: that one jumped when it was created (2026-11-21 17:00) and pulled the score to 0.
 
 The panel computes it over a rolling 24 hours from the recorder's 5-minute statistics of the solar, import and export
-totals and `sensor.dynamic_contract_import_cost`, bucketed per hour (prices from the EnergyZero list, older hours from
+totals, bucketed per hour (prices from the EnergyZero list, older hours from
 the statistics of `sensor.dynamic_electricity_price`), every 5 minutes. It does the same for each of the last 24 hours
-for the graph on the Nu slide. Until those statistics load it shows the HA sensors, which count from midnight:
+for the graph on the Vandaag slide. It needs at least 12 hours of data in the window. Until those statistics load it shows the HA sensors, which count from midnight:
 `sensor.energy_score_today`, `sensor.self_consumption_today`, `sensor.price_timing_score_today` (package
 `nest_display.yaml`, also used by the `kaarten` view). Statistics start 2026-11-21 17:00, so the first graph is short.
 
