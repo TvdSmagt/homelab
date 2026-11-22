@@ -82,8 +82,9 @@ change all the time anyway.
 
 Average of two parts (price timing alone when there was less than 0.1 kWh of solar):
 - **Eigen zon zelf gebruikt** (self consumption): share of the solar used in the house instead of exported.
-- **Slim getimed** (price timing): 100 x (dearest hour - paid per kWh) / (dearest - cheapest hour, at least € 0.01).
-  100 = all grid import at the cheapest hour of the window, 0 = all at the dearest, linear in between. Paid per kWh =
+- **Slim getimed** (price timing): 50 + 100 x (midpoint - paid per kWh) / (dearest - cheapest hour, at least € 0.03),
+  midpoint = (dearest + cheapest) / 2. 100 = all grid import at the cheapest hour of the window, 0 = all at the dearest,
+  linear in between. When the hour prices are less than 3 ct apart it stays near 50: timing hardly matters then. Paid per kWh =
   each hour's grid import x that hour's dynamic all-in price, divided by the total import. Not from the dynamic cost
   counter: that one jumped when it was created (2026-11-21 17:00). (Until 2026-11-22 the formula was
   50 + 50 x (average - paid) / (average - cheapest), which punished hard on days with flat prices.)

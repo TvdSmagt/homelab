@@ -1636,8 +1636,9 @@ class HomelabAmbientPanel extends HTMLElement {
   // Energy score over the last 24 hours instead of since midnight, and the same score at every hour of the last
   // 24 hours for the graph on the Nu slide. Same two parts as the HA sensors in packages/nest_display.yaml:
   //   self consumption  (solar - export) / solar, when solar >= 0.1 kWh
-  //   price timing      100 x (dearest hour - paid per kWh) / (dearest - cheapest hour, at least € 0.01):
-  //                     100 = all import at the cheapest hour, 0 = all at the dearest. Hour prices are the dynamic
+  //   price timing      50 + 100 x (midpoint - paid per kWh) / (dearest - cheapest hour, at least € 0.03), with
+  //                     midpoint = (dearest + cheapest) / 2: 100 = all import at the cheapest hour, 0 = all at the
+  //                     dearest; on a flat day (prices < 3 ct apart) it stays near 50. Hour prices are the dynamic
   //                     all-in prices in the window; paid = import of each hour x that hour's price / total import
   //                     (not the cost counter: it can jump, e.g. when created)
   // From the 5-minute statistics, bucketed per hour, so the current hour counts too.
@@ -1693,7 +1694,8 @@ class HomelabAmbientPanel extends HTMLElement {
         let pr = null;
         if (ip >= 0.2 && ps.length) {
           const hi = Math.max(...ps);
-          pr = clamp((100 * (hi - co / ip)) / Math.max(hi - Math.min(...ps), 0.01), 0, 100);
+          const lo = Math.min(...ps);
+          pr = clamp(50 + (100 * ((hi + lo) / 2 - co / ip)) / Math.max(hi - lo, 0.03), 0, 100);
         }
         const parts = [sc, pr].filter((v) => v != null);
         return { sc, pr, score: parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null, hours: n,
