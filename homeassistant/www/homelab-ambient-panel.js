@@ -11,7 +11,8 @@
 //   Nu           big clock, weather now (animated icon, moon phase, wind in Bft), day arc, tiles for rain, solar,
 //                and the energy score of the last 24 hours as a graph
 //   Energie      animated solar / grid / house flow, the energy score (last 24 h) with its two parts, and the
-//                dynamic electricity price per hour from 07:00 to 07:00 with the cheapest block for the dishwasher
+//                dynamic electricity price per hour (today, from 18:00 until 18:00 tomorrow) with the cheapest
+//                block for the dishwasher
 //   Vandaag      12-hour graph of solar vs house power and today's totals
 //   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
@@ -48,7 +49,7 @@ const DEFAULTS = {
   price_markup: 0.02,
   price_vat: 1.21,
   price_tax: 0.11085,
-  price_day_start: 7, // the price graph runs from this hour to the same hour the next day
+  price_evening: 18, // price graph: today 00-24 until this hour, then this hour to the same hour tomorrow
   cheap_hours: 3, // length of the cheapest block marked in the price graph (a dishwasher run)
   // Energy score over the last 24 hours, from the recorder's 5-minute statistics of these totals.
   solar_total: 'sensor.6fz463602f_generated_energy_total',
@@ -1565,14 +1566,14 @@ class HomelabAmbientPanel extends HTMLElement {
     return out;
   }
 
-  // Price per hour from 07:00 to 07:00 (price_day_start), the current hour outlined, past hours dimmed, and the
-  // cheapest block of `cheap_hours` from now on: when to start the dishwasher. Tomorrow's prices arrive around 13:00.
+  // Price per hour for 24 hours: today 00:00-24:00, and from 18:00 (price_evening) 18:00 to 18:00 tomorrow, when
+  // tomorrow's prices are known (EnergyZero has them around 14:00-15:00). Current hour outlined, past hours dimmed,
+  // and the cheapest block of `cheap_hours` from now on: when to start the dishwasher.
   _priceRender() {
     const c = this._c;
     const now = new Date();
     const t0 = new Date(now);
-    t0.setHours(c.price_day_start, 0, 0, 0);
-    if (now < t0) t0.setDate(t0.getDate() - 1);
+    t0.setHours(now.getHours() >= c.price_evening ? c.price_evening : 0, 0, 0, 0);
     const hours = [];
     for (let i = 0; i < 24; i++) {
       const d = new Date(t0);

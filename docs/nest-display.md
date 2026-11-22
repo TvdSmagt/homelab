@@ -21,7 +21,7 @@ of lights on.
 |---|---|
 | Background | Live sky: colour follows the real sun elevation (computed from the home location), a glow where the sun is, stars at night, drifting clouds by weather condition, falling rain when the radar says it rains now. Dimmed a bit after 21:00 |
 | Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours, solar today vs forecast, and the energy score of the last 24 hours with a graph of that score over the last day (tap a tile to open its slide) |
-| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour from 07:00 to 07:00 (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *vaatwasser* |
+| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour, today 00:00-24:00 and from 18:00 until 18:00 tomorrow (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *vaatwasser* |
 | Vandaag | 12 h graph of solar vs house power, today's totals (usage, import, export, gas, self consumption, cost) |
 | Regen | Rain next 2 hours (Buienradar, from KNMI radar). Skipped by the auto-rotation when it stays dry |
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days |
@@ -37,8 +37,9 @@ net flow: import minus export. `sensor.house_power` already does the same.
 
 The price graph uses the EnergyZero market prices (`sensor.energyzero_electricity_prices`, yesterday to tomorrow)
 with the same all-in formula as `sensor.dynamic_electricity_price`: (market + 0.020) x 1.21 + 0.11085 per kWh
-(`price_markup`, `price_vat`, `price_tax` in the card config). Tomorrow's prices are published around 13:00, so in the
-morning the night hours are still empty. `price_day_start` and `cheap_hours` set the window and the block length.
+(`price_markup`, `price_vat`, `price_tax` in the card config). The day-ahead auction closes at 12:00 and EnergyZero has tomorrow's prices
+around 14:00-15:00 (the REST sensor polls every 15 minutes), so the graph switches to 18:00-18:00 at 18:00
+(`price_evening`); `cheap_hours` sets the block length.
 
 The gas graphs come from the recorder's long-term statistics of `sensor.gas_meter_gas_consumption` (hourly and daily
 `change`), reloaded every 15 minutes. The P1 gas meter reports about once an hour, so the newest hour can lag; today's
