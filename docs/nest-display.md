@@ -82,15 +82,16 @@ change all the time anyway.
 
 Average of two parts (price timing alone when there was less than 0.1 kWh of solar):
 - **Eigen zon zelf gebruikt** (self consumption): share of the solar used in the house instead of exported.
-- **Slim getimed** (price timing): 50 + 50 x (average hour price - paid per kWh) / (average - cheapest hour, at least
-  € 0.02). Paid per kWh = each hour's grid import x that hour's dynamic all-in price, divided by the total import.
-  50 = paid the average, 100 = everything at the cheapest hour, 0 = far above average. Not from the dynamic cost
-  counter: that one jumped when it was created (2026-11-21 17:00) and pulled the score to 0.
+- **Slim getimed** (price timing): 100 x (dearest hour - paid per kWh) / (dearest - cheapest hour, at least € 0.01).
+  100 = all grid import at the cheapest hour of the window, 0 = all at the dearest, linear in between. Paid per kWh =
+  each hour's grid import x that hour's dynamic all-in price, divided by the total import. Not from the dynamic cost
+  counter: that one jumped when it was created (2026-11-21 17:00). (Until 2026-11-22 the formula was
+  50 + 50 x (average - paid) / (average - cheapest), which punished hard on days with flat prices.)
 
 The panel computes it over a rolling 24 hours from the recorder's 5-minute statistics of the solar, import and export
 totals, bucketed per hour (prices from the EnergyZero list, older hours from
 the statistics of `sensor.dynamic_electricity_price`), every 5 minutes. It does the same for each of the last 24 hours
-for the graph on the Vandaag slide. It needs at least 12 hours of data in the window. Until those statistics load it shows the HA sensors, which count from midnight:
+for the graph on the Vandaag slide (total, and both parts as thin lines). It needs at least 12 hours of data in the window. Until those statistics load it shows the HA sensors, which count from midnight:
 `sensor.energy_score_today`, `sensor.self_consumption_today`, `sensor.price_timing_score_today` (package
 `nest_display.yaml`, also used by the `kaarten` view). Statistics start 2026-11-21 17:00, so the first graph is short.
 

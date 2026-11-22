@@ -105,9 +105,10 @@ template:
           {% set imp = states('sensor.grid_import_today') | float(0) %}
           {{ (own / (own + imp) * 100) | round(0) if own + imp > 0 else 0 }}
         availability: "{{ has_value('sensor.grid_import_today') }}"
-      # How well grid import was timed: 50 = paid the average dynamic price of today's hours so far,
-      # 100 = everything at the cheapest hour, 0 = far above average. Uses the dynamic all-in price
-      # (packages/energy_contract.yaml), also while on the fixed contract.
+      # How well grid import was timed: 100 = everything at the cheapest of today's hours so far,
+      # 0 = everything at the dearest, linear in between. Uses the dynamic all-in price
+      # (packages/energy_contract.yaml), also while on the fixed contract. Same formula as the
+      # 24-hour score in homelab-ambient-panel.js.
       - name: Price timing score today
         unique_id: price_timing_score_today
         unit_of_measurement: "%"
@@ -120,9 +121,8 @@ template:
             {% set t = as_timestamp(p.readingDate) %}
             {% if start <= t <= ts %}{% set ns.v = ns.v + [(p.price + 0.020) * 1.21 + 0.11085] %}{% endif %}
           {% endfor %}
-          {% set avg = ns.v | sum / ns.v | count %}
           {% set paid = states('sensor.dynamic_import_cost_today') | float(0) / states('sensor.grid_import_today') | float(1) %}
-          {{ ([0, [100, 50 + 50 * (avg - paid) / ([avg - ns.v | min, 0.02] | max)] | min] | max) | round(0) }}
+          {{ ([0, [100, 100 * (ns.v | max - paid) / ([ns.v | max - ns.v | min, 0.01] | max)] | min] | max) | round(0) }}
         availability: >-
           {{ states('sensor.grid_import_today') | float(0) >= 0.2
              and (state_attr('sensor.energyzero_electricity_prices', 'Prices') or []) | count > 0 }}

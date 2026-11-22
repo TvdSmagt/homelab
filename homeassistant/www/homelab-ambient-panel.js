@@ -387,8 +387,13 @@ canvas.on { opacity: 1; }
 .vsg { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .vsg svg { flex: 1; width: 100%; min-height: 0; overflow: visible; }
 .vsg .ghx { font-size: 14px; margin-top: 3px; }
-.spark-l { fill: none; stroke: var(--sc, var(--muted)); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.spark-l { fill: none; stroke: var(--sc, var(--muted)); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
 .spark-a { fill: var(--sc, var(--muted)); opacity: .14; }
+.spark-p { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
+.spark-p.sc { stroke: var(--solar); }
+.spark-p.pr { stroke: var(--grid); }
+.vleg { display: flex; gap: 16px; font-size: 13.5px; color: var(--muted); margin-bottom: 4px; }
+.vleg i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: 4px; }
 .spark-r { stroke: rgba(255, 255, 255, .18); stroke-width: 1; stroke-dasharray: 3 4; }
 .hbar { height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .1); overflow: hidden; margin-top: 8px; }
 .hbar i { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, #ff9a3c, #ffd56b);
@@ -726,7 +731,7 @@ class HomelabAmbientPanel extends HTMLElement {
           </div>
           <button class="glass vscore press" id="vs" data-act="go" data-go="energie">
             <div class="vsl"><span class="label">Energiescore</span><b id="vs-num">–</b><small>laatste 24 uur</small></div>
-            <div class="vsg"><svg id="vs-spark" viewBox="0 0 200 60" preserveAspectRatio="none"></svg><div class="ghx" id="vs-x"></div></div>
+            <div class="vsg"><div class="vleg"><span><i style="background:var(--sc)"></i>totaal</span><span><i style="background:var(--solar)"></i>zon zelf gebruikt</span><span><i style="background:var(--grid)"></i>slim getimed</span></div><svg id="vs-spark" viewBox="0 0 200 60" preserveAspectRatio="none"></svg><div class="ghx" id="vs-x"></div></div>
           </button>
           <div class="chips" id="chips"></div>`)}
 
@@ -1425,8 +1430,11 @@ class HomelabAmbientPanel extends HTMLElement {
         significant_changes_only: false,
       });
       const series = ids.map((id) => (res[id] || []).map((p) => [(p.lu ?? p.lc) * 1000, parseFloat(p.s)]));
-      this._graph(start.getTime(), end.getTime(), series);
+      // Right after a Home Assistant restart the recorder can answer empty: keep the old graph, try again soon.
+      if (series.every((pts) => pts.length === 0)) this._histAt = Date.now() - 4.5 * 60 * 1000;
+      else this._graph(start.getTime(), end.getTime(), series);
     } catch (err) {
+      this._histAt = Date.now() - 4.5 * 60 * 1000; // retry in 30 s
       console.warn('homelab-ambient-panel: history failed', err);
     } finally {
       this._loading = false;
@@ -1511,6 +1519,7 @@ class HomelabAmbientPanel extends HTMLElement {
       this._cache.gas = null;
       this._gasRender();
     } catch (err) {
+      this._gasAt = Date.now() - 14.5 * 60 * 1000; // retry in 30 s
       console.warn('homelab-ambient-panel: gas statistics failed', err);
     } finally {
       this._gasLoading = false;
@@ -1627,9 +1636,10 @@ class HomelabAmbientPanel extends HTMLElement {
   // Energy score over the last 24 hours instead of since midnight, and the same score at every hour of the last
   // 24 hours for the graph on the Nu slide. Same two parts as the HA sensors in packages/nest_display.yaml:
   //   self consumption  (solar - export) / solar, when solar >= 0.1 kWh
-  //   price timing      50 + 50 x (average price - paid per kWh) / (average - cheapest hour, at least € 0.02),
-  //                     average = mean of the dynamic all-in hour prices in the window, paid = import of each hour
-  //                     x that hour's price / total import (not the cost counter: it can jump, e.g. when created)
+  //   price timing      100 x (dearest hour - paid per kWh) / (dearest - cheapest hour, at least € 0.01):
+  //                     100 = all import at the cheapest hour, 0 = all at the dearest. Hour prices are the dynamic
+  //                     all-in prices in the window; paid = import of each hour x that hour's price / total import
+  //                     (not the cost counter: it can jump, e.g. when created)
   // From the 5-minute statistics, bucketed per hour, so the current hour counts too.
   async _loadScore() {
     if (this._scoreLoading || !this._hass.callWS) return;
@@ -1682,8 +1692,8 @@ class HomelabAmbientPanel extends HTMLElement {
         const sc = so >= 0.1 ? clamp(((so - ex) / so) * 100, 0, 100) : null;
         let pr = null;
         if (ip >= 0.2 && ps.length) {
-          const avg = ps.reduce((a, b) => a + b, 0) / ps.length;
-          pr = clamp(50 + (50 * (avg - co / ip)) / Math.max(avg - Math.min(...ps), 0.02), 0, 100);
+          const hi = Math.max(...ps);
+          pr = clamp((100 * (hi - co / ip)) / Math.max(hi - Math.min(...ps), 0.01), 0, 100);
         }
         const parts = [sc, pr].filter((v) => v != null);
         return { sc, pr, score: parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null, hours: n,
@@ -1692,7 +1702,7 @@ class HomelabAmbientPanel extends HTMLElement {
       const points = [];
       for (let end = B - 24; end < B; end++) {
         const w = win(end);
-        points.push(w ? w.score : null);
+        points.push(w);
       }
       this._score24 = win(B - 1);
       this._scorePts = points;
@@ -1701,6 +1711,7 @@ class HomelabAmbientPanel extends HTMLElement {
       this._scoreRender();
       this._energy();
     } catch (err) {
+      this._scoreAt = Date.now() - 4.5 * 60 * 1000; // retry in 30 s
       console.warn('homelab-ambient-panel: score statistics failed', err);
     } finally {
       this._scoreLoading = false;
@@ -1712,7 +1723,7 @@ class HomelabAmbientPanel extends HTMLElement {
     const s = this._score24;
     const score = s ? s.score : num(this._hass, this._c.score);
     const pts = this._scorePts || [];
-    const key = `${score}|${pts.join()}`;
+    const key = `${score}|${pts.map((p) => (p ? `${p.score},${p.sc},${p.pr}` : '')).join()}`;
     if (key === this._cache.score) return;
     this._cache.score = key;
     const e = this._el;
@@ -1725,20 +1736,24 @@ class HomelabAmbientPanel extends HTMLElement {
     const W2 = 200;
     const x = (i) => ((i / Math.max(pts.length - 1, 1)) * W2).toFixed(1);
     const y = (v) => (56 - (v / 100) * 52).toFixed(1);
-    let line = '';
-    let area = '';
-    let run = [];
-    const flush = () => {
-      if (run.length > 1) {
-        const d = run.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i)} ${y(v)}`).join('');
-        line += `<path class="spark-l" d="${d}" vector-effect="non-scaling-stroke"/>`;
-        area += `<path class="spark-a" d="${d}L${x(run[run.length - 1][0])} 56L${x(run[0][0])} 56Z"/>`;
-      }
-      run = [];
+    // One line per series, broken where a value is missing; the total also gets a soft area.
+    const series = (key2, cls, area) => {
+      let out = '';
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) {
+          const d = run.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i)} ${y(v)}`).join('');
+          if (area) out += `<path class="spark-a" d="${d}L${x(run[run.length - 1][0])} 56L${x(run[0][0])} 56Z"/>`;
+          out += `<path class="${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+        }
+        run = [];
+      };
+      pts.forEach((p, i) => (p == null || p[key2] == null ? flush() : run.push([i, p[key2]])));
+      flush();
+      return out;
     };
-    pts.forEach((v, i) => (v == null ? flush() : run.push([i, v])));
-    flush();
-    e['vs-spark'].innerHTML = `<line class="spark-r" x1="0" x2="${W2}" y1="${y(50)}" y2="${y(50)}" vector-effect="non-scaling-stroke"/>${area}${line}`;
+    e['vs-spark'].innerHTML = `<line class="spark-r" x1="0" x2="${W2}" y1="${y(50)}" y2="${y(50)}" vector-effect="non-scaling-stroke"/>`
+      + series('sc', 'spark-p sc', false) + series('pr', 'spark-p pr', false) + series('score', 'spark-l', true);
   }
 
   _rooms() {
