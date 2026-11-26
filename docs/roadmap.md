@@ -10,6 +10,7 @@ Planned additions to the stack, as of 2026-10-10.
 - 2026-11-21: P1 cable connected and passed to Home Assistant ([smart-meter.md](smart-meter.md)).
   ZBT-2 flashed with Thread firmware; `otbr` and `matter-server` running ([matter-thread.md](matter-thread.md)).
   Remaining steps: the Home Assistant integrations and IPv6 forwarding on the host (see those docs).
+- 2026-11-26: solar surplus heats downstairs with the LG airco ([solar-heating.md](solar-heating.md)).
 
 ## Open housekeeping
 

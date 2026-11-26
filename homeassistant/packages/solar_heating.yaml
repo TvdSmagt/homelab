@@ -1,0 +1,302 @@
+# Heat downstairs with the LG airco (climate.airco_beneden, LG ThinQ cloud) when solar power is being exported.
+# Docs: docs/solar-heating.md.
+#
+# The airco draws roughly 0.5-1.5 kW itself, so once it runs the export drops: start and stop use separate
+# thresholds (export to start, import to stop) on a 5-minute average, so a passing cloud does not toggle it.
+# The fan starts on low and steps up (to at most *max ventilator*) while there is still export with the airco
+# running, and back to low when the house imports again.
+# Room temperature comes from Tado (sensor.beneden_beneden_temperature): the airco's own sensor reads far too low.
+# The automation only switches the airco off when it switched it on itself (input_boolean.solar_heating_active),
+# so manual use of the airco is left alone.
+
+# The runtime counters integrate a unitless 0/1 sensor, so they get no unit by themselves.
+homeassistant:
+  customize:
+    sensor.airco_beneden_draaiuren: &hours { unit_of_measurement: h, device_class: duration, icon: mdi:timer-outline }
+    sensor.airco_beneden_draaiuren_op_zon: *hours
+
+input_boolean:
+  solar_heating_enabled:
+    name: Zonneverwarming
+    icon: mdi:solar-power-variant
+  solar_heating_active:
+    name: Zonneverwarming actief
+    icon: mdi:heat-pump
+
+# No `initial:`, so values set in the UI survive a restart (defaults were set once: 21 °C, 1000 W, 500 W, 700 W; max fan medium).
+input_number:
+  solar_heating_target:
+    name: Zonneverwarming doeltemperatuur
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    min: 17
+    max: 24
+    step: 0.5
+  solar_heating_start_export:
+    name: Zonneverwarming start bij teruglevering
+    icon: mdi:transmission-tower-export
+    unit_of_measurement: W
+    min: 300
+    max: 3000
+    step: 100
+  solar_heating_stop_import:
+    name: Zonneverwarming stop bij afname
+    icon: mdi:transmission-tower-import
+    unit_of_measurement: W
+    min: 0
+    max: 2000
+    step: 100
+  solar_heating_step_up_export:
+    name: Zonneverwarming ventilator hoger bij teruglevering
+    icon: mdi:fan-chevron-up
+    unit_of_measurement: W
+    min: 200
+    max: 3000
+    step: 100
+
+input_select:
+  solar_heating_max_fan:
+    name: Zonneverwarming max ventilator
+    icon: mdi:fan
+    options: [low, medium, high]
+
+template:
+  - sensor:
+      # 0/1 sources for the runtime counters (sensor.airco_beneden_draaiuren*), which have long-term
+      # statistics: hours per day / week / month are kept forever, the raw climate history only 10 days.
+      - name: Airco beneden aan
+        unique_id: airco_beneden_on
+        icon: mdi:air-conditioner
+        state: "{{ 0 if states('climate.airco_beneden') in ['off', 'unavailable', 'unknown'] else 1 }}"
+      - name: Airco beneden aan op zon
+        unique_id: airco_beneden_on_solar
+        icon: mdi:solar-power-variant
+        state: >-
+          {{ 1 if states('climate.airco_beneden') not in ['off', 'unavailable', 'unknown']
+                  and is_state('input_boolean.solar_heating_active', 'on') else 0 }}
+      # Net grid power in W: positive = import, negative = export. The meter registers net the phases,
+      # the P1 totals per direction do not, so subtract them.
+      - name: Grid net power
+        unique_id: grid_net_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {{ ((states('sensor.electricity_meter_power_consumption') | float
+               - states('sensor.electricity_meter_power_production') | float) * 1000) | round(0) }}
+        availability: >-
+          {{ has_value('sensor.electricity_meter_power_consumption')
+             and has_value('sensor.electricity_meter_power_production') }}
+
+sensor:
+  - platform: statistics
+    name: Grid net power 5 min average
+    unique_id: grid_net_power_avg_5min
+    entity_id: sensor.grid_net_power
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+    sampling_size: 200
+    keep_last_sample: true
+    precision: 0
+
+  # Runtime of the airco downstairs, as 0/1 for the hour counters below (any mode but off counts as on).
+  - platform: integration
+    name: Airco beneden draaiuren
+    unique_id: airco_beneden_runtime_hours
+    source: sensor.airco_beneden_aan
+    unit_time: h
+    method: left
+    round: 3
+    max_sub_interval: { minutes: 5 }
+  - platform: integration
+    name: Airco beneden draaiuren op zon
+    unique_id: airco_beneden_runtime_solar_hours
+    source: sensor.airco_beneden_aan_op_zon
+    unit_time: h
+    method: left
+    round: 3
+    max_sub_interval: { minutes: 5 }
+
+automation:
+  - id: solar_heating_start
+    alias: "Zonneverwarming: airco beneden aan bij overschot"
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ states('sensor.grid_net_power_5_min_average') | float(0)
+             < -(states('input_number.solar_heating_start_export') | float(1000)) }}
+        for: { minutes: 2 }
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.solar_heating_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.solar_heating_active
+        state: "off"
+      - condition: state
+        entity_id: climate.airco_beneden
+        state: "off"
+      - condition: state
+        entity_id: sun.sun
+        state: above_horizon
+      - condition: template
+        value_template: >-
+          {{ states('sensor.grid_net_power_5_min_average') | float(0)
+             < -(states('input_number.solar_heating_start_export') | float(1000)) }}
+      - condition: template
+        value_template: >-
+          {{ states('sensor.beneden_beneden_temperature') | float(99)
+             < states('input_number.solar_heating_target') | float(21) - 0.5 }}
+    actions:
+      - action: logbook.log
+        data:
+          name: Zonneverwarming
+          entity_id: climate.airco_beneden
+          message: >-
+            aan: {{ states('sensor.grid_net_power_5_min_average') | float(0) | abs | round(0) | int }} W teruglevering, beneden {{ states('sensor.beneden_beneden_temperature') | float(0) | round(1) }} °C
+      - action: input_boolean.turn_on
+        target: { entity_id: input_boolean.solar_heating_active }
+      - action: climate.set_hvac_mode
+        target: { entity_id: climate.airco_beneden }
+        data: { hvac_mode: heat }
+      - delay: { seconds: 5 }
+      - action: climate.set_temperature
+        target: { entity_id: climate.airco_beneden }
+        data:
+          temperature: "{{ states('input_number.solar_heating_target') | float(21) }}"
+      - delay: { seconds: 5 }
+      - action: climate.set_fan_mode
+        target: { entity_id: climate.airco_beneden }
+        data: { fan_mode: low }
+
+  - id: solar_heating_stop
+    alias: "Zonneverwarming: airco beneden uit"
+    mode: single
+    triggers:
+      - trigger: template
+        id: import
+        value_template: >-
+          {{ states('sensor.grid_net_power_5_min_average') | float(0)
+             > states('input_number.solar_heating_stop_import') | float(500) }}
+        for: { minutes: 10 }
+      - trigger: template
+        id: warm
+        value_template: >-
+          {{ states('sensor.beneden_beneden_temperature') | float(0)
+             >= states('input_number.solar_heating_target') | float(21) }}
+        for: { minutes: 5 }
+      - trigger: sun
+        id: sunset
+        event: sunset
+      - trigger: state
+        id: disabled
+        entity_id: input_boolean.solar_heating_enabled
+        to: "off"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.solar_heating_active
+        state: "on"
+    actions:
+      - action: logbook.log
+        data:
+          name: Zonneverwarming
+          entity_id: climate.airco_beneden
+          message: >-
+            {% set w = states('sensor.grid_net_power_5_min_average') | float(0) | round(0) | int %}
+            {% set t = states('sensor.beneden_beneden_temperature') | float(0) | round(1) %}
+            uit: {{ {'import': 'afname ' ~ w ~ ' W',
+                     'warm': 'beneden ' ~ t ~ ' °C, doel bereikt',
+                     'sunset': 'zonsondergang',
+                     'disabled': 'AUTO uitgezet'}.get(trigger.id, trigger.id) }}
+      - action: climate.turn_off
+        target: { entity_id: climate.airco_beneden }
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.solar_heating_active }
+
+  # Someone switched the airco off (app, remote) while the automation had it on: forget that it was ours.
+  - id: solar_heating_manual_off
+    alias: "Zonneverwarming: airco handmatig uit"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: climate.airco_beneden
+        to: "off"
+        for: { minutes: 1 }
+    conditions:
+      - condition: state
+        entity_id: input_boolean.solar_heating_active
+        state: "on"
+    actions:
+      - action: logbook.log
+        data:
+          name: Zonneverwarming
+          entity_id: climate.airco_beneden
+          message: handmatig uitgezet
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.solar_heating_active }
+
+  # Target changed (e.g. - / + on the Nest Hub) while the automation runs the airco: pass it on.
+  - id: solar_heating_target_sync
+    alias: "Zonneverwarming: doeltemperatuur naar airco"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_number.solar_heating_target
+    conditions:
+      - condition: state
+        entity_id: input_boolean.solar_heating_active
+        state: "on"
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: climate.airco_beneden
+            state: "off"
+    actions:
+      - action: climate.set_temperature
+        target: { entity_id: climate.airco_beneden }
+        data:
+          temperature: "{{ states('input_number.solar_heating_target') | float(21) }}"
+
+  # Fan speed follows the surplus that is left with the airco running. Every 10 minutes (the 5-minute average
+  # needs time to show the effect of the last step): one step up while export stays above the threshold, up
+  # to the maximum; back to low as soon as the house imports.
+  - id: solar_heating_fan
+    alias: "Zonneverwarming: ventilator volgt overschot"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/10"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.solar_heating_active
+        state: "on"
+      - condition: state
+        entity_id: climate.airco_beneden
+        state: heat
+    variables:
+      fans: [low, medium, high]
+      cur: "{{ state_attr('climate.airco_beneden', 'fan_mode') }}"
+      i: "{{ fans.index(cur) if cur in fans else 0 }}"
+      top: "{{ fans.index(states('input_select.solar_heating_max_fan')) if states('input_select.solar_heating_max_fan') in fans else 0 }}"
+      net: "{{ states('sensor.grid_net_power_5_min_average') | float(0) }}"
+      up: "{{ states('input_number.solar_heating_step_up_export') | float(700) }}"
+      want: >-
+        {% if cur not in fans or i > top %}{{ fans[top] }}
+        {% elif net > 0 %}low
+        {% elif net < -up and i < top %}{{ fans[i + 1] }}
+        {% else %}{{ cur }}{% endif %}
+    actions:
+      - if: "{{ want != cur }}"
+        then:
+          - action: climate.set_fan_mode
+            target: { entity_id: climate.airco_beneden }
+            data: { fan_mode: "{{ want }}" }
+          - action: logbook.log
+            data:
+              name: Zonneverwarming
+              entity_id: climate.airco_beneden
+              message: "ventilator {{ cur }} → {{ want }} ({{ net | round(0) | int }} W net)"

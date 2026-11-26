@@ -26,6 +26,9 @@ const states = {
   'climate.beneden_beneden': st('heat', {temperature: 19, current_temperature: 19.2, hvac_action: 'idle', current_humidity: 58}),
   'climate.bibliotheek_bibliotheek': st('heat', {temperature: 18, current_temperature: 17.6, hvac_action: 'heating', current_humidity: 60}),
   'climate.kleine_kamer_kleine_kamer': st('off', {temperature: null, current_temperature: 16.1, hvac_action: 'off'}),
+  'climate.airco_beneden': st('heat', {temperature: 21, current_temperature: 12, fan_mode: 'low', min_temp: 7, max_temp: 35}),
+  'input_boolean.solar_heating_enabled': st('on'), 'input_boolean.solar_heating_active': st('on'),
+  'input_number.solar_heating_target': st('21.0', {min: 17, max: 24, step: 0.5}),
   'light.woonkamer_woonkamer': st('on', {brightness: 180}), 'light.keuken_keuken': st('off'),
   'light.eetkamer_eetkamer': st('on', {brightness: 90}), 'light.bibliotheek_bibliotheek': st('unavailable'),
 };

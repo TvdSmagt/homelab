@@ -18,7 +18,9 @@
 //                day with its two parts, and usage per day (solar, import, export, gas)
 //   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
-//                per hour (last 24 h) and per day (last 7 days) from the recorder's long-term statistics
+//                per hour (last 24 h) and per day (last 7 days) from the recorder's long-term statistics; a row
+//                for the airco downstairs with power, an AUTO toggle (heat on solar surplus,
+//                packages/solar_heating.yaml) and - / + for its target
 //   Lampen       lights and scenes
 //
 // On the Cast receiver (or with ?kiosk in the URL) it covers the whole screen and shifts a few pixels
@@ -73,6 +75,15 @@ const DEFAULTS = {
     { entity: 'climate.bibliotheek_bibliotheek', name: 'Bibliotheek' },
     { entity: 'climate.kleine_kamer_kleine_kamer', name: 'Kleine kamer' },
   ],
+  // Airco row on Klimaat (null hides it). `auto` switches the solar surplus heating on/off; while that has the
+  // airco on (`active`), - / + change `target` (the automation passes it on), otherwise the airco's own setpoint.
+  airco: {
+    entity: 'climate.airco_beneden',
+    name: 'Airco beneden',
+    auto: 'input_boolean.solar_heating_enabled',
+    active: 'input_boolean.solar_heating_active',
+    target: 'input_number.solar_heating_target',
+  },
   lights: [
     { entity: 'light.woonkamer_woonkamer', name: 'Woonkamer' },
     { entity: 'light.keuken_keuken', name: 'Keuken' },
@@ -550,8 +561,8 @@ canvas.on { opacity: 1; }
 
 /* ── Klimaat ── */
 .kbody { flex: 1; display: grid; grid-template-columns: 1fr 392px; gap: 14px; min-height: 0; }
-.rlist { display: grid; grid-auto-rows: 1fr; gap: 10px; min-height: 0; }
-.room { padding: 8px 12px 8px 22px; border-radius: 22px; display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+.rlist { display: grid; grid-auto-rows: minmax(0, 1fr); gap: 8px; min-height: 0; }
+.room { padding: 4px 10px 4px 22px; border-radius: 22px; display: grid; grid-template-columns: 1fr auto auto; align-items: center;
   gap: 14px; min-width: 0; transition: background 1s, border-color 1s; }
 .room.heat { background: linear-gradient(100deg, rgba(255, 138, 76, .3), rgba(255, 138, 76, .05) 70%), var(--glass);
   border-color: rgba(255, 138, 76, .35); }
@@ -560,10 +571,10 @@ canvas.on { opacity: 1; }
 .rtop span { display: flex; align-items: center; gap: 5px; font-size: 16px; color: var(--muted); margin-top: 1px; }
 .rtop ha-icon { --mdc-icon-size: 18px; }
 .heat .rtop span { color: var(--heat); }
-.cur { font-size: 50px; font-weight: 200; line-height: 1; letter-spacing: -.03em; white-space: nowrap; }
+.cur { font-size: 44px; font-weight: 200; line-height: 1; letter-spacing: -.03em; white-space: nowrap; }
 .heat .cur { color: var(--heat); }
 .ctl { display: flex; align-items: center; gap: 4px; }
-.ctl button { width: 58px; height: 58px; border-radius: 50%; font-size: 32px; font-weight: 300; line-height: 1;
+.ctl button { width: 50px; height: 50px; border-radius: 50%; font-size: 32px; font-weight: 300; line-height: 1;
   background: rgba(255, 255, 255, .1); border: 1px solid var(--edge); display: grid; place-items: center; }
 .ctl button:active { background: rgba(90, 174, 255, .45); }
 .ctl button:disabled { opacity: .25; }
@@ -593,6 +604,17 @@ canvas.on { opacity: 1; }
 .gd .now em, .gd .now span { color: var(--text); }
 .gd span { font-size: 15px; color: var(--muted); margin-top: 4px; }
 #water.on ha-icon { color: var(--heat); }
+.room.ac { grid-template-columns: 1fr auto auto auto; }
+.room.ac.heat .rtop span { color: var(--heat); }
+.acb { height: 50px; border-radius: 25px; background: rgba(255, 255, 255, .1); border: 1px solid var(--edge);
+  display: grid; place-items: center; color: var(--muted); transition: background .3s, color .3s, border-color .3s; }
+.acb ha-icon { --mdc-icon-size: 26px; }
+.acb.pwr { width: 50px; }
+.acb.auto { padding: 0 14px; font-size: 17px; font-weight: 600; letter-spacing: .08em; }
+.acb.on { background: rgba(255, 138, 76, .85); border-color: rgba(255, 178, 122, .9); color: #2a1200; }
+.acb.auto.on { background: rgba(255, 210, 90, .85); border-color: rgba(255, 228, 140, .9); color: #2a1f00; }
+.acb.pend { opacity: .6; }
+.acb:disabled { opacity: .25; }
 
 /* ── Lampen ── */
 .lgrid { flex: 1; display: grid; gap: 14px; min-height: 0; }
@@ -627,6 +649,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._pendingTemp = {};
     this._tempTimers = {};
     this._pendingLight = {};
+    this._pendingAc = {};
     this._cache = {};
     this._hideT = {};
     this._idx = 0;
@@ -1087,6 +1110,9 @@ class HomelabAmbientPanel extends HTMLElement {
     if (!t || t.disabled) return;
     const act = t.dataset.act;
     if (act === 'climate') this._step(t.dataset.entity, Number(t.dataset.dir));
+    else if (act === 'ac-power') this._acPower();
+    else if (act === 'ac-auto') this._acAuto();
+    else if (act === 'ac-step') this._acStep(Number(t.dataset.dir));
     else if (act === 'light') this._toggleLight(t.dataset.entity);
     else if (act === 'scene') this._scene(t, Number(t.dataset.i));
     else if (act === 'nav') this._go(Number(t.dataset.i));
@@ -1150,6 +1176,110 @@ class HomelabAmbientPanel extends HTMLElement {
       if (this._pendingTemp[id]) this._pendingTemp[id].sent = Date.now();
     }, 2000);
     this._rooms();
+  }
+
+  // ── airco ──
+  // Optimistic state per control ('power', 'auto'), like the lights: shown until HA agrees or 15 s pass
+  // (the LG cloud can take a few seconds).
+  _acState(key, actual) {
+    const p = this._pendingAc[key];
+    if (p) {
+      if (actual === p.to || Date.now() - p.at > 15000) delete this._pendingAc[key];
+      else return p.to;
+    }
+    return actual;
+  }
+
+  _acPower() {
+    const a = this._c.airco;
+    const s = this._hass.states[a.entity];
+    if (!s || s.state === 'unavailable') return;
+    const on = this._acState('power', s.state !== 'off');
+    this._pendingAc.power = { to: !on, at: Date.now() };
+    if (on) this._hass.callService('climate', 'turn_off', { entity_id: a.entity });
+    else this._hass.callService('climate', 'set_hvac_mode', { entity_id: a.entity, hvac_mode: 'heat' });
+    this._rooms();
+  }
+
+  _acAuto() {
+    const a = this._c.airco;
+    const s = this._hass.states[a.auto];
+    if (!s) return;
+    const on = this._acState('auto', s.state === 'on');
+    this._pendingAc.auto = { to: !on, at: Date.now() };
+    this._hass.callService('input_boolean', on ? 'turn_off' : 'turn_on', { entity_id: a.auto });
+    this._rooms();
+  }
+
+  // Which setpoint - / + change: the solar target while the automation runs the airco or the airco is off,
+  // the airco's own setpoint when someone switched it on by hand.
+  _acTargetEntity() {
+    const a = this._c.airco;
+    const s = this._hass.states[a.entity];
+    const manual = s && s.state !== 'off' && s.state !== 'unavailable' && this._hass.states[a.active]?.state !== 'on';
+    return manual || !this._hass.states[a.target] ? a.entity : a.target;
+  }
+
+  _acTarget() {
+    const id = this._acTargetEntity();
+    const s = this._hass.states[id];
+    if (!s) return { id, value: null };
+    const actual = id.startsWith('input_number.') ? Number(s.state) : s.attributes.temperature;
+    const p = this._pendingTemp[id];
+    if (p) {
+      if (actual === p.value || (p.sent && Date.now() - p.sent > 60000)) delete this._pendingTemp[id];
+      else return { id, value: p.value };
+    }
+    return { id, value: actual == null || Number.isNaN(actual) ? null : actual };
+  }
+
+  _acStep(dir) {
+    const { id, value } = this._acTarget();
+    const s = this._hass.states[id];
+    if (value == null || !s) return;
+    const isNum = id.startsWith('input_number.');
+    const lo = isNum ? Number(s.attributes.min) : s.attributes.min_temp ?? 16;
+    const hi = isNum ? Number(s.attributes.max) : s.attributes.max_temp ?? 30;
+    const v = clamp(Math.round((value + dir * this._c.temp_step) * 2) / 2, lo, hi);
+    this._pendingTemp[id] = { value: v, sent: null };
+    clearTimeout(this._tempTimers[id]);
+    this._tempTimers[id] = setTimeout(() => {
+      if (isNum) this._hass.callService('input_number', 'set_value', { entity_id: id, value: v });
+      else this._hass.callService('climate', 'set_temperature', { entity_id: id, temperature: v });
+      if (this._pendingTemp[id]) this._pendingTemp[id].sent = Date.now();
+    }, 2000);
+    this._rooms();
+  }
+
+  _acRow() {
+    const a = this._c.airco;
+    const h = this._hass;
+    const s = a && h.states[a.entity];
+    if (!s) return '';
+    const na = s.state === 'unavailable';
+    const on = !na && this._acState('power', s.state !== 'off');
+    const autoS = h.states[a.auto];
+    const auto = !!autoS && this._acState('auto', autoS.state === 'on');
+    const solar = on && h.states[a.active]?.state === 'on';
+    const { id, value } = this._acTarget();
+    const fan = { low: 'laag', medium: 'middel', high: 'hoog', auto: 'auto' }[s.attributes.fan_mode];
+    const fanTxt = on && fan ? ` · ${fan}` : '';
+    const status = na
+      ? 'onbereikbaar'
+      : solar
+        ? `<ha-icon icon="mdi:solar-power-variant"></ha-icon>op zon${fanTxt}`
+        : on
+          ? `<ha-icon icon="mdi:fire"></ha-icon>handmatig${fanTxt}`
+          : auto ? 'uit · wacht op zon' : 'uit';
+    return `<div class="glass room ac${on ? ' heat' : ''}">
+      <div class="rtop press" data-act="info" data-entity="${a.entity}"><b>${a.name || s.attributes.friendly_name}</b><span>${status}</span></div>
+      <button class="acb auto press${auto ? ' on' : ''}${this._pendingAc.auto ? ' pend' : ''}" data-act="ac-auto"${autoS ? '' : ' disabled'} aria-label="automatisch">AUTO</button>
+      <button class="acb pwr press${on ? ' on' : ''}${this._pendingAc.power ? ' pend' : ''}" data-act="ac-power"${na ? ' disabled' : ''} aria-label="aan / uit"><ha-icon icon="mdi:power"></ha-icon></button>
+      <div class="ctl">
+        <button class="press" data-act="ac-step" data-dir="-1"${value == null ? ' disabled' : ''} aria-label="lager">−</button>
+        <div class="tgt${this._pendingTemp[id] ? ' pend' : ''}"><small>doel</small>${value == null ? '–' : `${fmt(value, 1)}°`}</div>
+        <button class="press" data-act="ac-step" data-dir="1"${value == null ? ' disabled' : ''} aria-label="hoger">+</button>
+      </div></div>`;
   }
 
   // ── rendering ──
@@ -2071,7 +2201,7 @@ class HomelabAmbientPanel extends HTMLElement {
           </div></div>`;
       })
       .join('');
-    this._set('rooms', this._el.rooms, rows);
+    this._set('rooms', this._el.rooms, rows + this._acRow());
     this._badge('klimaat', heatingN > 0, heatingN, 'var(--heat)');
     const w = h.states[this._c.hot_water];
     const won = w && w.state !== 'off';
