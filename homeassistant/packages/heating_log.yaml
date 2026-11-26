@@ -1,0 +1,91 @@
+# Data for comparing airco heating with gas heating, a few weeks after 2026-11-26. Docs: docs/solar-heating.md#data.
+#
+# Only sensors with a state_class get long-term statistics (hourly mean / min / max, kept forever); the recorder keeps
+# the raw history only 10 days. Already recorded elsewhere: gas (sensor.gas_meter_gas_consumption), outdoor temperature
+# (sensor.koekelberg25_outdoor_temperature), per-zone temperature and heating demand (sensor.<zone>_temperature,
+# sensor.<zone>_heating, Tado), house power (sensor.house_power), solar, airco runtime (sensor.airco_beneden_draaiuren*).
+# This adds what those miss: setpoints (a higher setpoint uses more gas, whatever the airco does), the airco's fan
+# stage and on/off per hour, and wind.
+
+template:
+  - sensor:
+      # Setpoints; 0 when the zone or the airco is off, so the hourly mean also shows how long it was on.
+      - name: Woonkamer doeltemperatuur
+        unique_id: heating_log_setpoint_woonkamer
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('climate.woonkamer_woonkamer', 'temperature') or 0 }}"
+        availability: "{{ has_value('climate.woonkamer_woonkamer') }}"
+      - name: Beneden doeltemperatuur
+        unique_id: heating_log_setpoint_beneden
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('climate.beneden_beneden', 'temperature') or 0 }}"
+        availability: "{{ has_value('climate.beneden_beneden') }}"
+      - name: Bibliotheek doeltemperatuur
+        unique_id: heating_log_setpoint_bibliotheek
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('climate.bibliotheek_bibliotheek', 'temperature') or 0 }}"
+        availability: "{{ has_value('climate.bibliotheek_bibliotheek') }}"
+      - name: Kleine kamer doeltemperatuur
+        unique_id: heating_log_setpoint_kleine_kamer
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('climate.kleine_kamer_kleine_kamer', 'temperature') or 0 }}"
+        availability: "{{ has_value('climate.kleine_kamer_kleine_kamer') }}"
+      - name: Airco beneden doeltemperatuur
+        unique_id: heating_log_setpoint_airco_beneden
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: >-
+          {{ 0 if states('climate.airco_beneden') == 'off'
+             else state_attr('climate.airco_beneden', 'temperature') or 0 }}
+        availability: "{{ has_value('climate.airco_beneden') }}"
+
+      # Airco downstairs: 1 while heating (any other mode, e.g. cooling, counts as 0), hourly mean = share of the hour.
+      - name: Airco beneden verwarmt
+        unique_id: heating_log_airco_beneden_heating
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:heat-pump
+        state: "{{ 100 if is_state('climate.airco_beneden', 'heat') else 0 }}"
+        availability: "{{ has_value('climate.airco_beneden') }}"
+      # Fan stage while on: 0 off, 1 low, 2 medium, 3 high, 4 auto.
+      - name: Airco beneden ventilatorstand
+        unique_id: heating_log_airco_beneden_fan
+        state_class: measurement
+        icon: mdi:fan
+        state: >-
+          {{ 0 if states('climate.airco_beneden') == 'off'
+             else {'low': 1, 'medium': 2, 'high': 3, 'auto': 4}.get(state_attr('climate.airco_beneden', 'fan_mode'), 0) }}
+        availability: "{{ has_value('climate.airco_beneden') }}"
+      # The airco's own temperature reading, to see how far it is off from Tado.
+      - name: Airco beneden gemeten temperatuur
+        unique_id: heating_log_airco_beneden_current
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('climate.airco_beneden', 'current_temperature') }}"
+        availability: "{{ state_attr('climate.airco_beneden', 'current_temperature') is number }}"
+
+      # Weather that drives heat loss besides the outdoor temperature (met.no, updates ~hourly).
+      - name: Wind speed
+        unique_id: heating_log_wind_speed
+        unit_of_measurement: km/h
+        device_class: wind_speed
+        state_class: measurement
+        state: "{{ state_attr('weather.forecast_home', 'wind_speed') }}"
+        availability: "{{ state_attr('weather.forecast_home', 'wind_speed') is number }}"
+      - name: Cloud coverage
+        unique_id: heating_log_cloud_coverage
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:weather-cloudy
+        state: "{{ state_attr('weather.forecast_home', 'cloud_coverage') }}"
+        availability: "{{ state_attr('weather.forecast_home', 'cloud_coverage') is number }}"

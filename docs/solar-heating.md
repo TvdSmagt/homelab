@@ -67,9 +67,34 @@ Only the airco downstairs is controlled; *Airco Boven* is in Home Assistant but 
   statistics-graph card with *change*. They integrate the 0/1 sensors `sensor.airco_beneden_aan(_op_zon)`; the unit
   is set with `customize`, since a unitless source gives the counter no unit.
 
+## Data
+
+To find out whether the airco really saves gas, and at what COP. Collecting since 2026-11-26; all as hourly
+long-term statistics (kept forever). Extra sensors in
+[homeassistant/packages/heating_log.yaml](../homeassistant/packages/heating_log.yaml).
+
+| What | Sensor |
+|---|---|
+| Gas | `sensor.gas_meter_gas_consumption` (DSMR, hourly) |
+| Outdoor temperature | `sensor.koekelberg25_outdoor_temperature` (Tado) |
+| Wind, cloud cover | `sensor.wind_speed`, `sensor.cloud_coverage` (met.no) |
+| Room temperature and heating demand per zone | `sensor.<zone>_temperature`, `sensor.<zone>_heating` (Tado, %) |
+| Setpoints | `sensor.<zone>_doeltemperatuur`, `sensor.airco_beneden_doeltemperatuur` (0 = off) |
+| Airco on, fan, own reading | `sensor.airco_beneden_verwarmt` (% of the hour), `sensor.airco_beneden_ventilatorstand` (0 off, 1-3 low-high, 4 auto), `sensor.airco_beneden_gemeten_temperatuur` |
+| Airco runtime | `sensor.airco_beneden_draaiuren`, `sensor.airco_beneden_draaiuren_op_zon` |
+| Electricity | `sensor.house_power`, `sensor.grid_net_power` |
+
+**Comparison, after a few weeks:** hours (or days) with and without the airco at a similar outdoor temperature, wind
+and setpoints: the difference in gas and in Tado's heating demand downstairs is what the airco saves. The airco's
+electricity is not measured; estimate it from the rise in `sensor.house_power` in hours with the airco on (noisy:
+other appliances), or put the airco on a meter with readout for an exact COP. Gas in kWh of heat:
+m³ x ~8.8 (HR boiler). Break-even COP at the 2026 tariffs: 0.277 / (1.516 / 8.8) ≈ 1.6.
+
 ## Cost
 
-With the 2026 fixed tariffs, airco heat (EUR 0.277/kWh / COP ~3.5 ≈ EUR 0.08 per kWh of heat) is already cheaper than gas
-(EUR 1.516/m3 / ~8.8 kWh ≈ EUR 0.17), even when the power is imported. Until 2026-12-31, net metering means exported
+Gas heat costs ~EUR 0.17/kWh (EUR 1.516/m3 / ~8.8 kWh), so the airco is cheaper while its COP is above ~1.6
+(EUR 0.277/kWh electricity). Air-to-air units typically reach 3.5-4.5 at +7 °C and 2-2.5 at -7 °C, but the model's
+SCOP is unknown (ThinQ reports only `RAC_056905_NL`) and the real gas saving depends on Tado calling for less heat;
+see Data. Until 2026-12-31, net metering means exported
 power earns the import price; from 2027-01-01 it earns ~EUR 0.01, which makes heating with the surplus nearly free.
 For now it only runs on surplus, by choice.
