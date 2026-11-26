@@ -1608,7 +1608,8 @@ class HomelabAmbientPanel extends HTMLElement {
     }
     e['g-price'].innerHTML = bars;
 
-    // Score lines, broken where a value is missing. Each point sits at the end of its 24-hour window.
+    // Score lines, broken where a value is missing. Each point sits at the end of its 24-hour window. The first
+    // points lie before t0: the line starts at t0, interpolated from the last point before it.
     const pts = this._scorePts || [];
     const T0 = this._scoreT0;
     const ys = (v) => gy(clamp(v / 100, 0, 1)).toFixed(1);
@@ -1619,10 +1620,16 @@ class HomelabAmbientPanel extends HTMLElement {
         if (run.length > 1) out += `<path class="${cls}" d="${run.map(([t, v], i) => `${i ? 'L' : 'M'}${x(t)} ${ys(v)}`).join('')}" vector-effect="non-scaling-stroke"/>`;
         run = [];
       };
+      let prev = null;
       pts.forEach((p, i) => {
         const t = Math.min(T0 + (i + 1) * 3600000, t1);
-        if (p == null || p[k] == null || t < t0) flush();
-        else run.push([t, p[k]]);
+        const v = p == null ? null : p[k];
+        if (v == null) flush();
+        else if (t >= t0) {
+          if (!run.length && prev && prev[0] < t0) run.push([t0, prev[1] + ((v - prev[1]) * (t0 - prev[0])) / (t - prev[0])]);
+          run.push([t, v]);
+        }
+        prev = v == null ? null : [t, v];
       });
       flush();
       return out;
@@ -1836,7 +1843,8 @@ class HomelabAmbientPanel extends HTMLElement {
       const c = this._c;
       const hNow = new Date();
       hNow.setMinutes(0, 0, 0);
-      const B = 48; // buckets: 47 full hours and the current one
+      const B = 50; // buckets: 49 full hours and the current one
+      const NP = 26; // score points: 24 hours of graph plus 2, so the line reaches the graph's left edge
       const H0 = hNow.getTime() - (B - 1) * 3600000;
       const ids = [c.solar_total, c.import_total, c.export_total];
       const [sums, means] = await Promise.all([
@@ -1881,14 +1889,14 @@ class HomelabAmbientPanel extends HTMLElement {
         return { sc, pr, score: avgOf([sc, pr]), hours: n, avg: avgOf(ps), paid: ip > 0 ? co / ip : null };
       };
       const points = [];
-      for (let end = B - 24; end < B; end++) {
+      for (let end = B - NP; end < B; end++) {
         const w = win(end);
         points.push(w);
       }
       this._hourP = price.map((p, i) => ({ t: H0 + i * 3600000, p }));
       this._score24 = win(B - 1);
       this._scorePts = points;
-      this._scoreT0 = H0 + (B - 24) * 3600000;
+      this._scoreT0 = H0 + (B - NP) * 3600000;
       this._cache.score = null;
       this._scoreRender();
       this._energy();
