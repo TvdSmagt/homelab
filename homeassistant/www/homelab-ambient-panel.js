@@ -43,7 +43,6 @@ const DEFAULTS = {
   gas_today: 'sensor.gas_today',
   gas: 'sensor.gas_meter_gas_consumption', // meter reading (m³), its long-term statistics feed the gas graph
   gas_price: 1.51574, // EUR per m³ incl. VAT, fixed contract (packages/energy_contract.yaml)
-  cost_today: 'sensor.cost_today', // daily utility meter on the fixed contract total
   // Dynamic electricity prices: EnergyZero market prices (yesterday - tomorrow) and the all-in formula of
   // sensor.dynamic_electricity_price in packages/energy_contract.yaml: (market + markup) x VAT + energy tax.
   prices: 'sensor.energyzero_electricity_prices',
@@ -1493,11 +1492,11 @@ class HomelabAmbientPanel extends HTMLElement {
     const xT = num(h, c.export_today);
     const use = sT != null && iT != null && xT != null ? sT - xT + iT : null;
     const chips = [
+      ['mdi:solar-power-variant', 'var(--solar)', `${fmt(sT)} kWh`, 'opgewekt'],
       ['mdi:home-lightning-bolt', 'var(--home)', `${fmt(use)} kWh`, 'verbruikt'],
       ['mdi:transmission-tower-import', 'var(--grid)', `${fmt(iT)} kWh`, 'van het net'],
       ['mdi:transmission-tower-export', 'var(--export)', `${fmt(xT)} kWh`, 'teruggeleverd'],
       ['mdi:fire', 'var(--heat)', `${fmt(num(h, c.gas_today), 2)} m³`, 'gas'],
-      ['mdi:cash', 'var(--muted)', `€ ${fmt(num(h, c.cost_today), 2)}`, 'kosten'],
     ];
     this._set('chips', e.chips, chips
       .map(([i, col, v, l]) => `<div class="chip" style="--ic:${col}"><ha-icon icon="${i}"></ha-icon><div><b>${v}</b><span>${l}</span></div></div>`)
