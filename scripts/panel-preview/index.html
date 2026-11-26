@@ -34,7 +34,16 @@ const states = {
 };
 const now = Date.now()/1000;
 const hist = (f) => Array.from({length: 150}, (_, i) => ({ lu: now - 12*3600 + i*288, s: String(f(i/150)) }));
+const conds = ['partlycloudy', 'partlycloudy', 'cloudy', 'rainy', 'rainy', 'cloudy', 'partlycloudy', 'sunny'];
+const hour0 = Math.floor(Date.now() / 3600e3) * 3600e3, noon0 = new Date().setHours(12, 0, 0, 0);
+const forecast = {
+  hourly: Array.from({length: 48}, (_, i) => ({ datetime: new Date(hour0 + i*3600e3).toISOString(), condition: conds[Math.floor(i/2) % 8],
+    temperature: 9 + 3*Math.sin((new Date(hour0 + i*3600e3).getHours() - 9) / 24 * 6.28), precipitation: [3, 4, 9].includes(Math.floor(i/2) % 8 + i % 2 * 5) ? 0.8 + (i % 3) : 0 })),
+  daily: Array.from({length: 6}, (_, i) => ({ datetime: new Date(noon0 + i*86400e3).toISOString(), condition: ['partlycloudy', 'rainy', 'cloudy', 'sunny', 'pouring', 'fog'][i],
+    temperature: [11, 8, 9, 12, 7, 5][i], templow: [4, 5, 3, 2, 4, -1][i], precipitation: [0.4, 6.2, 0, 0, 12.5, 0][i] })),
+};
 const hass = { states, connected: true, config: {latitude: 52.37, longitude: 4.89},
+  connection: { subscribeMessage: async (cb, m) => { setTimeout(() => cb({ type: m.forecast_type, forecast: forecast[m.forecast_type] }), 0); return () => {}; } },
   callService: (...a) => console.log('svc', JSON.stringify(a)),
   callWS: async (m) => {
     if (m.type.startsWith('history') && m.entity_ids[0] === 'sensor.gas_meter_gas_consumption') { // hourly readings, a few seconds off the hour

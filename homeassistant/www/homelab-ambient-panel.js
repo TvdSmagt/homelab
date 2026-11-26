@@ -16,7 +16,8 @@
 //                with its two parts (right axis) and the dynamic price per hour as tinted bars behind; today's totals
 //   Verleden     the last 7 days: fixed vs dynamic contract (since the start and per day), the energy score per
 //                day with its two parts, and usage per day (solar, import, export, gas)
-//   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
+//   Weer         forecast for the next 12 hours and the next days (weather entity, subscribed over the websocket),
+//                and the rain next 2 hours (Buienradar / KNMI radar) as a graph at the bottom
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
 //                per hour (last 24 h) and per day (last 7 days) from the recorder's long-term statistics; a row
 //                for the airco downstairs with power, an AUTO toggle (heat on solar surplus,
@@ -97,12 +98,13 @@ const DEFAULTS = {
     { off: 'light.beneden', name: 'Uit', icon: 'mdi:power' },
   ],
   graph_hours: 24,
+  forecast_hours: 12, // Weer: hours in the hourly row
   temp_step: 0.5,
   // carousel
   start: 'nu', // slide shown first
   rotate: 20, // seconds per slide, 0 = no auto-rotation
   resume_after: 90, // seconds without a touch before the rotation continues
-  rotate_slides: ['nu', 'energie', 'vandaag', 'verleden', 'regen', 'klimaat'], // Lampen only by button or swipe
+  rotate_slides: ['nu', 'energie', 'vandaag', 'verleden', 'weer', 'klimaat'], // Lampen only by button or swipe
 };
 
 // ── Small helpers ───────────────────────────────────────────────────────────────────────────────
@@ -275,7 +277,7 @@ const SLIDES = [
   { id: 'energie', name: 'Energie', icon: 'mdi:lightning-bolt', ac: '#3fd68f' },
   { id: 'vandaag', name: 'Vandaag', icon: 'mdi:chart-areaspline', ac: '#5aaeff' },
   { id: 'verleden', name: 'Verleden', icon: 'mdi:history', ac: '#c3a6ff' },
-  { id: 'regen', name: 'Regen', icon: 'mdi:weather-pouring', ac: '#6fb8ff' },
+  { id: 'weer', name: 'Weer', icon: 'mdi:weather-partly-rainy', ac: '#6fb8ff' },
   { id: 'klimaat', name: 'Klimaat', icon: 'mdi:thermostat', ac: '#ff8a4c' },
   { id: 'lampen', name: 'Lampen', icon: 'mdi:lightbulb-group', ac: '#ffc46b' },
 ];
@@ -544,20 +546,38 @@ canvas.on { opacity: 1; }
 .ufoot { display: flex; justify-content: space-between; align-items: baseline; }
 .ufoot em { font-style: normal; font-size: 14px; color: var(--heat); white-space: nowrap; }
 
-/* ── Regen ── */
-.rhead { display: flex; align-items: center; gap: 18px; padding: 0 6px; flex: none; }
-.rhead ha-icon { --mdc-icon-size: 58px; color: var(--ri, var(--rain)); }
-.rtitle { font-size: 36px; font-weight: 400; line-height: 1.15; }
-.rsub { font-size: 20px; color: var(--muted); margin-top: 3px; }
-.rcard { flex: 1; min-height: 0; padding: 26px 22px 14px; display: flex; flex-direction: column; }
-.bars { flex: 1; display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--faint);
-  position: relative; padding-right: 66px; }
+/* ── Weer ── */
+.wcard { padding: 12px 20px 10px; display: flex; flex-direction: column; text-align: left; min-height: 0; }
+.fh { height: 150px; flex: none; }
+.fd { height: 154px; flex: none; }
+.wnow { font-size: 17px; color: var(--muted); }
+.fcols { flex: 1; min-height: 0; display: flex; margin-top: 4px; }
+.fcols > div { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  white-space: nowrap; }
+.fcols > div + div { border-left: 1px solid rgba(255, 255, 255, .05); }
+.fcols svg { width: 50px; height: 50px; overflow: visible; display: block; }
+.fcols svg * { animation: none !important; }
+.fcols em { font-style: normal; font-size: 16px; color: var(--muted); }
+.fcols .now em { color: var(--text); font-weight: 500; }
+.fcols b { font-size: 27px; font-weight: 300; line-height: 1; }
+.fcols b small { font-size: 19px; color: var(--muted); margin-left: 6px; }
+.fcols .mm { font-size: 14px; color: var(--rain); min-height: 17px; }
+.fd .fcols svg { width: 44px; height: 44px; }
+.trng { flex: none; width: 64%; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .09); position: relative; }
+.trng i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: linear-gradient(90deg, #6fb8ff, #ffb938); }
+.rcard { flex: 1; min-height: 0; padding: 12px 20px 8px; display: flex; flex-direction: column; text-align: left; }
+.rtop2 { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.rtop2 ha-icon { --mdc-icon-size: 26px; color: var(--ri, var(--rain)); }
+.rtitle { font-size: 20px; font-weight: 500; color: var(--ri, var(--rain)); }
+.rsub { font-size: 16px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.bars { flex: 1; min-height: 0; display: flex; align-items: flex-end; gap: 3px; border-bottom: 1px solid var(--faint);
+  position: relative; padding-right: 56px; margin-top: 8px; }
 .bars u { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(255, 255, 255, .1); text-decoration: none; }
-.bars u::after { content: attr(data-l); position: absolute; right: 0; top: -11px; font-size: 15px; color: var(--muted); }
-.bars i { flex: 1; border-radius: 5px 5px 0 0; min-height: 3px; background: linear-gradient(180deg, #8fd0ff, #3d8fe0);
+.bars u::after { content: attr(data-l); position: absolute; right: 0; top: -9px; font-size: 13px; color: var(--muted); }
+.bars i { flex: 1; border-radius: 4px 4px 0 0; min-height: 3px; background: linear-gradient(180deg, #8fd0ff, #3d8fe0);
   transition: height 1s ease; }
 .bars i.dry { background: rgba(255, 255, 255, .12); }
-.raxis { display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); margin-top: 8px; padding-right: 66px; }
+.raxis { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-top: 3px; padding-right: 56px; }
 
 /* ── Klimaat ── */
 .kbody { flex: 1; display: grid; grid-template-columns: 1fr 392px; gap: 14px; min-height: 0; }
@@ -646,6 +666,11 @@ class HomelabAmbientPanel extends HTMLElement {
 
   setConfig(config) {
     this._c = { ...DEFAULTS, ...config };
+    // The Weer slide was called Regen; keep older configs working.
+    const rn = (id) => (id === 'regen' ? 'weer' : id);
+    this._c.start = rn(this._c.start);
+    if (Array.isArray(this._c.rotate_slides)) this._c.rotate_slides = this._c.rotate_slides.map(rn);
+    this._fc = {};
     this._pendingTemp = {};
     this._tempTimers = {};
     this._pendingLight = {};
@@ -669,10 +694,12 @@ class HomelabAmbientPanel extends HTMLElement {
     if (!this._gasAt || Date.now() - this._gasAt > 15 * 60 * 1000) this._loadGas();
     if (!this._scoreAt || Date.now() - this._scoreAt > 5 * 60 * 1000) this._loadScore();
     if (!this._pastAt || Date.now() - this._pastAt > 15 * 60 * 1000) this._loadPast();
+    if (!this._fcSubs) this._subForecast();
   }
 
   connectedCallback() {
     if (this._root) this._start();
+    if (this._hass && !this._fcSubs) this._subForecast();
   }
 
   disconnectedCallback() {
@@ -684,6 +711,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._rainRaf = null;
     if (this._ro) this._ro.disconnect();
     this._running = false;
+    this._unsubForecast();
   }
 
   // ── build ──
@@ -749,7 +777,7 @@ class HomelabAmbientPanel extends HTMLElement {
             </div>
           </div>
           <div class="strip">
-            <button class="glass tile press" id="nr" data-act="go" data-go="regen">
+            <button class="glass tile press" id="nr" data-act="go" data-go="weer">
               <ha-icon class="ti" id="nr-icon" icon="mdi:weather-partly-cloudy"></ha-icon>
               <div class="tt"><b id="nr-title">Regen</b><small id="nr-sub"></small></div>
             </button>
@@ -848,13 +876,21 @@ class HomelabAmbientPanel extends HTMLElement {
             <div class="udays" id="past-use"></div>
           </div>`)}
 
-        ${slide('regen', `
-          <div class="rhead"><ha-icon id="ricon" icon="mdi:weather-partly-cloudy"></ha-icon>
-            <div><div class="rtitle" id="rtitle">Regenverwachting</div><div class="rsub" id="rsub"></div></div></div>
-          <div class="glass rcard press" data-act="info" data-entity="${c.rain}">
+        ${slide('weer', `
+          <button class="glass wcard fh press" data-act="info" data-entity="${c.weather}">
+            <div class="gtop"><span class="label">Komende uren</span><span class="wnow" id="w-now"></span></div>
+            <div class="fcols" id="fc-h"></div>
+          </button>
+          <button class="glass wcard fd press" data-act="info" data-entity="${c.weather}">
+            <span class="label">Komende dagen</span>
+            <div class="fcols" id="fc-d"></div>
+          </button>
+          <button class="glass rcard press" data-act="info" data-entity="${c.rain}">
+            <div class="rtop2"><span class="label">Regen · 2 uur</span><ha-icon id="ricon" icon="mdi:weather-partly-cloudy"></ha-icon>
+              <span class="rtitle" id="rtitle">Regenverwachting</span><span class="rsub" id="rsub"></span></div>
             <div class="bars" id="bars"></div>
             <div class="raxis" id="raxis"></div>
-          </div>`)}
+          </button>`)}
 
         ${slide('klimaat', `
           <div class="shead"><h2>Klimaat</h2><span><span id="outdoor"></span><span id="water"></span></span></div>
@@ -1010,7 +1046,6 @@ class HomelabAmbientPanel extends HTMLElement {
       const i = (this._idx + k) % n;
       const id = SLIDES[i].id;
       if (Array.isArray(list) && !list.includes(id)) continue;
-      if (id === 'regen' && this._dry) continue; // the Nu slide already says it stays dry
       return i;
     }
     return this._idx;
@@ -1295,6 +1330,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._lights();
     this._weather();
     this._rain();
+    this._forecastRender();
     this._harvest();
     this._gasRender();
     this._priceRender();
@@ -1410,6 +1446,90 @@ class HomelabAmbientPanel extends HTMLElement {
     }
   }
 
+  // ── Weer: hourly and daily forecast ──
+  // Weather entities no longer carry the forecast as an attribute; the frontend subscribes to it over the
+  // websocket and gets a new list each time the integration updates (met.no: about every 30 minutes).
+  _subForecast() {
+    const conn = this._hass && this._hass.connection;
+    const id = this._c.weather;
+    if (!conn || !conn.subscribeMessage || !id || !this.isConnected) return;
+    this._fcSubs = ['hourly', 'daily'].map((type) =>
+      conn
+        .subscribeMessage((msg) => {
+          this._fc[type] = Array.isArray(msg.forecast) ? msg.forecast : [];
+          this._cache.fc = null;
+          this._forecastRender();
+        }, { type: 'weather/subscribe_forecast', forecast_type: type, entity_id: id })
+        .catch(() => null));
+  }
+
+  _unsubForecast() {
+    if (!this._fcSubs) return;
+    this._fcSubs.forEach((p) => p.then((un) => un && un()).catch(() => {}));
+    this._fcSubs = null;
+  }
+
+  _forecastRender() {
+    const w = this._hass.states[this._c.weather];
+    const e = this._el;
+    const hourly = this._fc.hourly || (w && w.attributes.forecast) || [];
+    const daily = this._fc.daily || [];
+    const now = new Date();
+    const hourKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
+    const key = `${hourKey}|${w ? w.state + w.attributes.temperature : ''}|${this._fc.hourly ? this._fc.hourly.length : '-'}|${this._fc.daily ? this._fc.daily.length : '-'}`;
+    if (key === this._cache.fc) return;
+    this._cache.fc = key;
+    const lat = this._hass.config && this._hass.config.latitude;
+    const lon = this._hass.config && this._hass.config.longitude;
+    const isNight = (d) => (typeof lat === 'number' && typeof lon === 'number' ? sunElevation(d, lat, lon) < -0.833 : d.getHours() < 7 || d.getHours() >= 18);
+    const icon = (cond, night, d) => weatherSvg((WEATHER[cond] || [0, 'cloud'])[1], night, moonPhase(d));
+    const mm = (v) => (v != null && v >= 0.1 ? `${fmt(v, v < 10 ? 1 : 0)} mm` : '');
+
+    if (w) {
+      const a = w.attributes;
+      const label = (WEATHER[w.state] || [w.state])[0];
+      e['w-now'].textContent = `${a.temperature == null ? '–' : `${fmt(a.temperature, 0)}°`} · ${label}`;
+    }
+
+    // Hours from the current one on.
+    const h0 = new Date(now);
+    h0.setMinutes(0, 0, 0);
+    const hours = hourly.filter((f) => new Date(f.datetime) >= h0).slice(0, this._c.forecast_hours);
+    this._set('fc-h', e['fc-h'], hours.length
+      ? hours.map((f, i) => {
+        const d = new Date(f.datetime);
+        return `<div class="${i === 0 ? 'now' : ''}"><em>${i === 0 ? 'nu' : `${String(d.getHours()).padStart(2, '0')}:00`}</em>${icon(f.condition, isNight(d), d)}
+          <b>${f.temperature == null ? '–' : `${fmt(f.temperature, 0)}°`}</b><span class="mm">${mm(f.precipitation)}</span></div>`;
+      }).join('')
+      : '<div><em>geen uurverwachting</em></div>');
+
+    // Days from today on; the bar shows each day's low - high on the scale of the whole week.
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const days = daily.filter((f) => new Date(f.datetime) >= today).slice(0, 7);
+    const lows = days.map((f) => (f.templow != null ? f.templow : f.temperature)).filter((v) => v != null);
+    const highs = days.map((f) => f.temperature).filter((v) => v != null);
+    const lo = Math.min(...lows);
+    const span = Math.max(1, Math.max(...highs) - lo);
+    this._set('fc-d', e['fc-d'], days.length
+      ? days.map((f, i) => {
+        const d = new Date(f.datetime);
+        const ds = new Date(d);
+        ds.setHours(0, 0, 0, 0);
+        const n = Math.round((ds - today) / 86400e3);
+        const name = n === 0 ? 'vandaag' : n === 1 ? 'morgen' : d.toLocaleDateString(NL, { weekday: 'long' });
+        const cond = f.condition === 'clear-night' ? 'sunny' : f.condition; // met.no gives today's night condition
+        const low = f.templow != null ? f.templow : null;
+        const x0 = (((low != null ? low : f.temperature) - lo) / span) * 100;
+        const x1 = ((f.temperature - lo) / span) * 100;
+        return `<div class="${n === 0 ? 'now' : ''}"><em>${name}</em>${icon(cond, false, d)}
+          <b>${f.temperature == null ? '–' : `${fmt(f.temperature, 0)}°`}${low != null ? `<small>${fmt(low, 0)}°</small>` : ''}</b>
+          <span class="trng"><i style="left:${x0.toFixed(0)}%;width:${Math.max(4, x1 - x0).toFixed(0)}%"></i></span>
+          <span class="mm">${mm(f.precipitation)}</span></div>`;
+      }).join('')
+      : '<div><em>geen dagverwachting</em></div>');
+  }
+
   _rain() {
     const s = this._hass.states[this._c.rain];
     const raw = s ? s.state : '';
@@ -1425,7 +1545,7 @@ class HomelabAmbientPanel extends HTMLElement {
       e['nr-title'].textContent = title;
       e.rsub.textContent = sub;
       e['nr-sub'].textContent = sub;
-      e['s-regen'].style.setProperty('--ri', color);
+      e['s-weer'].style.setProperty('--ri', color);
       e.nr.style.setProperty('--ti', color);
     };
     const [start, list] = (raw || '').split('|');
@@ -1434,8 +1554,7 @@ class HomelabAmbientPanel extends HTMLElement {
       head('mdi:weather-cloudy-alert', 'Regenverwachting', 'geen gegevens van Buienradar', 'var(--muted)');
       e.bars.innerHTML = '';
       e.raxis.innerHTML = '';
-      this._dry = true;
-      this._badge('regen', false);
+      this._badge('weer', false);
       this._setRain(RAINY.has(cond) ? 1 : 0);
       return;
     }
@@ -1463,8 +1582,7 @@ class HomelabAmbientPanel extends HTMLElement {
       sub = `over ${first * 5} minuten, tot ${fmt(peak, 1)} mm/u`;
     }
     head(icon, title, sub, first === -1 ? 'var(--solar)' : 'var(--rain)');
-    this._dry = first === -1;
-    this._badge('regen', first !== -1, null, 'var(--rain)');
+    this._badge('weer', first !== -1, null, 'var(--rain)');
     // Square-root scale up to 5 mm/h: drizzle stays visible and a shower does not flatten the rest.
     // Guide lines at 0.5 / 2 / 5 mm/h (31% / 63% / 100% on the square-root scale).
     e.bars.innerHTML = '<u style="bottom:31%" data-l="licht"></u><u style="bottom:63%" data-l="matig"></u><u style="bottom:100%" data-l="zwaar"></u>' + mm
