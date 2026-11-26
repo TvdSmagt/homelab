@@ -12,7 +12,8 @@
 //   Energie      animated solar / grid / house flow, the energy score (last 24 h) with its two parts, and the
 //                dynamic electricity price per hour (today, from 18:00 until 18:00 tomorrow) with the cheapest
 //                block marked
-//   Vandaag      12-hour graph of solar vs house power, the energy score of the last 24 hours as a graph, today's totals
+//   Vandaag      one 24-hour graph: solar vs house power (left axis), the energy score over the preceding 24 hours
+//                with its two parts (right axis) and the dynamic price per hour as tinted bars behind; today's totals
 //   Verleden     the last 7 days: fixed vs dynamic contract (since the start and per day), the energy score per
 //                day with its two parts, and usage per day (solar, import, export, gas)
 //   Regen        rain next 2 hours (Buienradar / KNMI radar); skipped by the auto-rotation when it stays dry
@@ -85,7 +86,7 @@ const DEFAULTS = {
     { entity: 'scene.beneden_bright', name: 'Fel', icon: 'mdi:white-balance-sunny' },
     { off: 'light.beneden', name: 'Uit', icon: 'mdi:power' },
   ],
-  graph_hours: 12,
+  graph_hours: 24,
   temp_step: 0.5,
   // carousel
   start: 'nu', // slide shown first
@@ -270,6 +271,7 @@ const SLIDES = [
 ];
 const GW = 940; // graph viewBox
 const GH = 200;
+const gy = (f) => GH - 2 - f * (GH - 14); // graph y of a fraction of the axis (0 = bottom, 1 = top guide)
 
 // ── Styles ──────────────────────────────────────────────────────────────────────────────────────
 const STYLE = `
@@ -401,21 +403,8 @@ canvas.on { opacity: 1; }
 .tile b { display: block; font-size: 24px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile b em { font-style: normal; font-size: 17px; font-weight: 400; color: var(--muted); }
 .tile small { display: block; font-size: 16.5px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vscore { flex: none; height: 116px; padding: 12px 18px 8px 22px; display: flex; gap: 22px; text-align: left; }
-.vsl { width: 170px; flex: none; display: flex; flex-direction: column; justify-content: center; }
-.vsl b { font-size: 58px; font-weight: 300; line-height: 1; color: var(--sc, var(--muted)); letter-spacing: -.02em; margin-top: 4px; }
-.vsl small { font-size: 14px; color: var(--muted); margin-top: 2px; }
-.vsg { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.vsg svg { flex: 1; width: 100%; min-height: 0; overflow: visible; }
-.vsg .ghx { font-size: 14px; margin-top: 3px; }
-.spark-l { fill: none; stroke: var(--sc, var(--muted)); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
-.spark-a { fill: var(--sc, var(--muted)); opacity: .14; }
-.spark-p { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
-.spark-p.sc { stroke: var(--solar); }
-.spark-p.pr { stroke: var(--grid); }
 .vleg { display: flex; gap: 16px; font-size: 13.5px; color: var(--muted); margin-bottom: 4px; }
 .vleg i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: 4px; }
-.spark-r { stroke: rgba(255, 255, 255, .18); stroke-width: 1; stroke-dasharray: 3 4; }
 .hbar { height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .1); overflow: hidden; margin-top: 8px; }
 .hbar i { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, #ff9a3c, #ffd56b);
   transition: width 1.5s ease; }
@@ -481,12 +470,27 @@ canvas.on { opacity: 1; }
 /* ── Vandaag ── */
 .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin: 0 6px 0 4px; }
 .gcard { flex: 1; min-height: 0; padding: 16px 18px 10px; display: flex; flex-direction: column; }
-.gcard svg { flex: 1; width: 100%; min-height: 0; display: block; }
+.gcard .vleg { flex: none; margin: 0 46px 6px; gap: 18px; font-size: 14.5px; }
+.gcard .vleg em { font-style: normal; margin-left: auto; }
+.gplot { flex: 1; min-height: 0; position: relative; margin: 0 46px; }
+.gplot svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.gy { position: absolute; top: 0; bottom: 0; width: 42px; font-size: 13.5px; }
+.gy span { position: absolute; transform: translateY(-50%); white-space: nowrap; }
+.gy.l { left: -46px; text-align: right; color: var(--muted); } .gy.l span { right: 0; }
+.gy.r { right: -46px; color: var(--sc, var(--muted)); } .gy.r span { left: 0; }
+.g-price rect { opacity: .13; }
+.vleg i.dash { background: repeating-linear-gradient(90deg, var(--dc) 0 3px, transparent 3px 6px) !important; }
+.g-score { fill: none; stroke: var(--sc, var(--muted)); stroke-width: 3.5; stroke-linejoin: round; stroke-linecap: round; }
+.g-part { fill: none; stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; opacity: .85; }
+.g-part.sc { stroke: var(--solar); }
+.g-part.pr { stroke: var(--grid); }
+.vsn { color: var(--muted); } .vsn b { font-size: 30px; font-weight: 400; color: var(--sc, var(--muted)); margin-left: 4px; }
 .g-solar { fill: url(#gsolar); stroke: var(--solar); stroke-width: 2.5; }
 .g-house { fill: none; stroke: var(--home); stroke-width: 3; }
+.g-hpeak { fill: var(--home); opacity: .28; }
 .g-base { stroke: var(--faint); stroke-width: 1; }
 .g-guide { stroke: rgba(255, 255, 255, .07); stroke-width: 1; stroke-dasharray: 3 6; }
-.gaxis { display: flex; justify-content: space-between; font-size: 16px; color: var(--muted); margin-top: 6px; }
+.gaxis { display: flex; justify-content: space-between; font-size: 16px; color: var(--muted); margin: 6px 46px 0; }
 .chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; flex: none; }
 .chip { background: var(--glass); border: 1px solid var(--edge); border-radius: 20px; padding: 10px 12px; display: flex;
   align-items: center; gap: 10px; min-width: 0; }
@@ -775,22 +779,25 @@ class HomelabAmbientPanel extends HTMLElement {
 
         ${slide('vandaag', `
           <div class="shead"><h2>Vandaag</h2>
-            <span class="legend"><span><i style="background:var(--solar)"></i>zon</span><span><i style="background:var(--home)"></i>huis</span><span id="g-peak"></span></span></div>
-          <div class="glass gcard">
-            <svg viewBox="0 0 ${GW} ${GH}" preserveAspectRatio="none">
-              <defs><linearGradient id="gsolar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb938" stop-opacity=".6"/><stop offset="1" stop-color="#ffb938" stop-opacity=".04"/></linearGradient></defs>
-              <line class="g-guide" x1="0" y1="${GH * 0.36}" x2="${GW}" y2="${GH * 0.36}" vector-effect="non-scaling-stroke"/>
-              <line class="g-guide" x1="0" y1="${GH * 0.68}" x2="${GW}" y2="${GH * 0.68}" vector-effect="non-scaling-stroke"/>
-              <line class="g-base" x1="0" y1="${GH - 0.5}" x2="${GW}" y2="${GH - 0.5}" vector-effect="non-scaling-stroke"/>
-              <path id="g-solar" class="g-solar" vector-effect="non-scaling-stroke"/>
-              <path id="g-house" class="g-house" vector-effect="non-scaling-stroke"/>
-            </svg>
+            <button class="vsn press" id="vs" data-act="go" data-go="energie">energiescore <b id="vs-num">–</b></button></div>
+          <div class="glass gcard" id="gcard">
+            <div class="vleg"><span><i style="background:var(--solar)"></i>zon</span><span><i style="background:var(--home)"></i>huis</span><span><i style="background:var(--home);opacity:.35;height:9px;vertical-align:1px"></i>piek per 5 min</span><span><i style="background:var(--sc)"></i>score</span><span><i class="dash" style="--dc:var(--solar)"></i>zon zelf gebruikt</span><span><i class="dash" style="--dc:var(--grid)"></i>slim getimed</span><span><i style="background:linear-gradient(90deg,hsl(140,70%,55%),hsl(0,70%,55%));opacity:.6;height:9px;vertical-align:1px"></i><span id="g-plab">prijs p/u</span></span><em id="g-peak"></em></div>
+            <div class="gplot">
+              <svg viewBox="0 0 ${GW} ${GH}" preserveAspectRatio="none">
+                <defs><linearGradient id="gsolar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb938" stop-opacity=".6"/><stop offset="1" stop-color="#ffb938" stop-opacity=".04"/></linearGradient></defs>
+                <g id="g-price" class="g-price"></g>
+                <line class="g-guide" x1="0" y1="${gy(0.5)}" x2="${GW}" y2="${gy(0.5)}" vector-effect="non-scaling-stroke"/>
+                <line class="g-guide" x1="0" y1="${gy(1)}" x2="${GW}" y2="${gy(1)}" vector-effect="non-scaling-stroke"/>
+                <line class="g-base" x1="0" y1="${GH - 0.5}" x2="${GW}" y2="${GH - 0.5}" vector-effect="non-scaling-stroke"/>
+                <path id="g-solar" class="g-solar" vector-effect="non-scaling-stroke"/>
+                <path id="g-hpeak" class="g-hpeak"/>
+                <path id="g-house" class="g-house" vector-effect="non-scaling-stroke"/>
+                <g id="g-score"></g>
+              </svg>
+              <div class="gy l" id="gyl"></div><div class="gy r" id="gyr"></div>
+            </div>
             <div class="gaxis" id="gaxis"></div>
           </div>
-          <button class="glass vscore press" id="vs" data-act="go" data-go="energie">
-            <div class="vsl"><span class="label">Energiescore</span><b id="vs-num">–</b><small>laatste 24 uur</small></div>
-            <div class="vsg"><div class="vleg"><span><i style="background:var(--sc)"></i>totaal</span><span><i style="background:var(--solar)"></i>zon zelf gebruikt</span><span><i style="background:var(--grid)"></i>slim getimed</span></div><svg id="vs-spark" viewBox="0 0 200 60" preserveAspectRatio="none"></svg><div class="ghx" id="vs-x"></div></div>
-          </button>
           <div class="chips" id="chips"></div>`)}
 
         ${slide('verleden', `
@@ -1493,67 +1500,130 @@ class HomelabAmbientPanel extends HTMLElement {
       .join(''));
   }
 
+  // Solar and house power for the Vandaag graph from the recorder's 5-minute statistics (mean per 5 minutes):
+  // ~290 points per sensor for 24 hours instead of thousands of raw states. HA keeps those 10 days by default.
   async _loadHistory() {
     if (this._loading || !this._hass.callWS) return;
     this._loading = true;
     this._histAt = Date.now();
     try {
-      const end = new Date();
-      const start = new Date(end.getTime() - this._c.graph_hours * 3600 * 1000);
+      const t1 = Date.now();
+      const t0 = t1 - this._c.graph_hours * 3600 * 1000;
       const ids = [this._c.solar, this._c.house];
       const res = await this._hass.callWS({
-        type: 'history/history_during_period',
-        start_time: start.toISOString(),
-        end_time: end.toISOString(),
-        entity_ids: ids,
-        minimal_response: true,
-        no_attributes: true,
-        significant_changes_only: false,
+        type: 'recorder/statistics_during_period',
+        start_time: new Date(t0).toISOString(),
+        statistic_ids: ids,
+        period: '5minute',
+        types: ['mean', 'max'],
       });
-      const series = ids.map((id) => (res[id] || []).map((p) => [(p.lu ?? p.lc) * 1000, parseFloat(p.s)]));
+      // [time, value] per 5 minutes; the newest period is written a few minutes after it ends, so end with the
+      // value right now. House also gets the highest value of each 5 minutes, for the peak band.
+      const pts = (id, k) => (res[id] || [])
+        .filter((r) => typeof r[k] === 'number')
+        .map((r) => [(typeof r.start === 'number' ? r.start : Date.parse(r.start)) + 150000, r[k]])
+        .concat([[t1, Math.max(watts(this._hass, id) ?? 0, 0)]]);
+      const series = [pts(ids[0], 'mean'), pts(ids[1], 'mean'), pts(ids[1], 'max')];
       // Right after a Home Assistant restart the recorder can answer empty: keep the old graph, try again soon.
-      if (series.every((pts) => pts.length === 0)) this._histAt = Date.now() - 4.5 * 60 * 1000;
-      else this._graph(start.getTime(), end.getTime(), series);
+      if (ids.every((id) => !(res[id] || []).length)) this._histAt = Date.now() - 4.5 * 60 * 1000;
+      else {
+        this._pow = { t0, t1, series };
+        this._graph();
+      }
     } catch (err) {
       this._histAt = Date.now() - 4.5 * 60 * 1000; // retry in 30 s
-      console.warn('homelab-ambient-panel: history failed', err);
+      console.warn('homelab-ambient-panel: power statistics failed', err);
     } finally {
       this._loading = false;
     }
   }
 
-  _graph(t0, t1, [solarPts, housePts]) {
-    const N = 96; // buckets over the graph period
+  // The Vandaag graph: solar (area) and house power (line) on the left axis, the energy score over the preceding
+  // 24 hours at each hour with its two parts on the right axis (0-100), and the price per hour as tinted bars behind
+  // (green = cheapest hour of the window, red = dearest; no axis, the range is in the legend).
+  _graph() {
+    const P = this._pow;
+    if (!P) return;
+    const { t0, t1 } = P;
+    const e = this._el;
+    const N = Math.round((t1 - t0) / 300000); // one point per 5-minute statistic
     const bucket = (pts) => {
       const out = [];
       let j = 0;
-      let last = 0;
+      let last = null;
       for (let b = 0; b < N; b++) {
         const end = t0 + ((b + 1) * (t1 - t0)) / N;
         let sum = 0;
         let n = 0;
         while (j < pts.length && pts[j][0] <= end) {
-          const v = Number.isNaN(pts[j][1]) ? 0 : pts[j][1];
-          sum += v;
-          n += 1;
-          last = v;
+          if (pts[j][0] > end - (t1 - t0) / N) { sum += pts[j][1]; n += 1; }
+          last = pts[j][1];
           j += 1;
         }
-        out.push(n ? sum / n : last);
+        out.push(n ? sum / n : last ?? 0);
       }
       return out;
     };
-    const solar = bucket(solarPts);
-    const house = bucket(housePts);
-    const peak = Math.max(500, ...solar, ...house);
-    const x = (b) => ((b / (N - 1)) * GW).toFixed(1);
-    const y = (v) => (GH - 2 - (Math.max(v, 0) / peak) * (GH - 12)).toFixed(1);
-    const line = (vals) => vals.map((v, b) => `${b ? 'L' : 'M'}${x(b)} ${y(v)}`).join('');
-    this._el['g-solar'].setAttribute('d', `${line(solar)}L${GW} ${GH}L0 ${GH}Z`);
-    this._el['g-house'].setAttribute('d', line(house));
-    this._el['g-peak'].textContent = `piek ${power(Math.max(...solar, ...house))}`;
+    const [solar, house, houseMax] = P.series.map(bucket);
+    const peak = houseMax.map((v, b) => Math.max(v, house[b])); // the live point has no max of its own
+    const max = Math.max(...solar, ...peak);
+    const top = max <= 500 ? 500 : Math.ceil(max / 1000) * 1000; // axis top in whole kW, so the middle label is round too
+    const x = (t) => (((t - t0) / (t1 - t0)) * GW).toFixed(1);
+    const xb = (b) => ((b / (N - 1)) * GW).toFixed(1);
+    const yp = (v) => gy(clamp(v / top, 0, 1)).toFixed(1);
+    const line = (vals) => vals.map((v, b) => `${b ? 'L' : 'M'}${xb(b)} ${yp(v)}`).join('');
+    e['g-solar'].setAttribute('d', `${line(solar)}L${GW} ${GH}L0 ${GH}Z`);
+    e['g-house'].setAttribute('d', line(house));
+    // Peak band: from the 5-minute mean up to the 5-minute max, so short peaks (kettle, oven) stay visible.
+    const back = house.map((v, b) => `L${xb(b)} ${yp(v)}`).reverse().join('');
+    e['g-hpeak'].setAttribute('d', `${line(peak)}${back}Z`);
+    e['g-peak'].textContent = `piek ${power(max)}`;
+    const pos = (f) => `top:${((gy(f) / GH) * 100).toFixed(2)}%`;
+    e.gyl.innerHTML = [0.5, 1].map((f) => `<span style="${pos(f)}">${power(top * f)}</span>`).join('');
+    e.gyr.innerHTML = [0.5, 1].map((f) => `<span style="${pos(f)}">${f * 100}</span>`).join('');
     const ticks = [0, 0.25, 0.5, 0.75].map((q) => `<span>${hhmm(new Date(t0 + q * (t1 - t0)))}</span>`);
-    this._el.gaxis.innerHTML = `${ticks.join('')}<span>nu</span>`;
+    e.gaxis.innerHTML = `${ticks.join('')}<span>nu</span>`;
+
+    // Price per hour behind the lines.
+    const hp = this._hourP || [];
+    const known = hp.filter((h) => h.p != null).map((h) => h.p);
+    let bars = '';
+    if (known.length) {
+      const lo = Math.min(...known);
+      const hi = Math.max(...known);
+      const floor = Math.max(0, lo - (hi - lo) * 0.6);
+      for (const { t, p } of hp) {
+        if (p == null || t + 3600000 <= t0 || t >= t1) continue;
+        const f = hi - lo < 0.005 ? 0.5 : (p - lo) / (hi - lo);
+        const h = (0.08 + ((p - floor) / (hi - floor || 1)) * 0.92) * (GH - 14);
+        const xa = Math.max(t, t0);
+        const xe = Math.min(t + 3600000, t1);
+        bars += `<rect x="${x(xa)}" width="${Math.max(x(xe) - x(xa) - 2, 0.5).toFixed(1)}" y="${(GH - h).toFixed(1)}" height="${h.toFixed(1)}" fill="hsl(${Math.round(140 - f * 140)}, 70%, 55%)"/>`;
+      }
+      e['g-plab'].textContent = `prijs p/u € ${fmt(lo, 2)}–${fmt(hi, 2)}`;
+    }
+    e['g-price'].innerHTML = bars;
+
+    // Score lines, broken where a value is missing. Each point sits at the end of its 24-hour window.
+    const pts = this._scorePts || [];
+    const T0 = this._scoreT0;
+    const ys = (v) => gy(clamp(v / 100, 0, 1)).toFixed(1);
+    const series = (k, cls) => {
+      let out = '';
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) out += `<path class="${cls}" d="${run.map(([t, v], i) => `${i ? 'L' : 'M'}${x(t)} ${ys(v)}`).join('')}" vector-effect="non-scaling-stroke"/>`;
+        run = [];
+      };
+      pts.forEach((p, i) => {
+        const t = Math.min(T0 + (i + 1) * 3600000, t1);
+        if (p == null || p[k] == null || t < t0) flush();
+        else run.push([t, p[k]]);
+      });
+      flush();
+      return out;
+    };
+    e['g-score'].innerHTML = T0 ? series('sc', 'g-part sc') + series('pr', 'g-part pr') + series('score', 'g-score') : '';
   }
 
   // Gas per hour and per day from the recorder's long-term statistics of the meter reading.
@@ -1780,6 +1850,7 @@ class HomelabAmbientPanel extends HTMLElement {
         const w = win(end);
         points.push(w);
       }
+      this._hourP = price.map((p, i) => ({ t: H0 + i * 3600000, p }));
       this._score24 = win(B - 1);
       this._scorePts = points;
       this._scoreT0 = H0 + (B - 24) * 3600000;
@@ -1794,7 +1865,7 @@ class HomelabAmbientPanel extends HTMLElement {
     }
   }
 
-  // Score card on the Vandaag slide: the number now and a line of the 24-hour score at each hour of the last day.
+  // Score number in the Vandaag header; the score lines are drawn in the Vandaag graph.
   _scoreRender() {
     const s = this._score24;
     const score = s ? s.score : num(this._hass, this._c.score);
@@ -1804,32 +1875,9 @@ class HomelabAmbientPanel extends HTMLElement {
     this._cache.score = key;
     const e = this._el;
     e.vs.style.setProperty('--sc', scoreColor(score));
+    e.gcard.style.setProperty('--sc', scoreColor(score));
     e['vs-num'].textContent = score == null ? '–' : Math.round(score);
-    if (this._scoreT0) {
-      const hh = (t) => `${String(new Date(t).getHours()).padStart(2, '0')}:00`;
-      e['vs-x'].innerHTML = [0, 6, 12, 18].map((i) => `<span>${hh(this._scoreT0 + i * 3600000)}</span>`).join('') + '<span>nu</span>';
-    }
-    const W2 = 200;
-    const x = (i) => ((i / Math.max(pts.length - 1, 1)) * W2).toFixed(1);
-    const y = (v) => (56 - (v / 100) * 52).toFixed(1);
-    // One line per series, broken where a value is missing; the total also gets a soft area.
-    const series = (key2, cls, area) => {
-      let out = '';
-      let run = [];
-      const flush = () => {
-        if (run.length > 1) {
-          const d = run.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i)} ${y(v)}`).join('');
-          if (area) out += `<path class="spark-a" d="${d}L${x(run[run.length - 1][0])} 56L${x(run[0][0])} 56Z"/>`;
-          out += `<path class="${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-        }
-        run = [];
-      };
-      pts.forEach((p, i) => (p == null || p[key2] == null ? flush() : run.push([i, p[key2]])));
-      flush();
-      return out;
-    };
-    e['vs-spark'].innerHTML = `<line class="spark-r" x1="0" x2="${W2}" y1="${y(50)}" y2="${y(50)}" vector-effect="non-scaling-stroke"/>`
-      + series('sc', 'spark-p sc', false) + series('pr', 'spark-p pr', false) + series('score', 'spark-l', true);
+    this._graph();
   }
 
   // Verleden: per day for the last `past_days` days (today included), from the recorder's hourly long-term

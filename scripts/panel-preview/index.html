@@ -39,6 +39,8 @@ const hass = { states, connected: true, config: {latitude: 52.37, longitude: 4.8
     const step = {'5minute': 300e3, hour: 3600e3, day: 86400e3}[m.period];
     const t0 = Date.parse(m.start_time); const n = Math.floor((Date.now() - t0) / step);
     const f = {
+      'sensor.6fz463602f_pv_output_actual': (h, i) => Math.max(0, Math.sin((h + (i % 12) / 12 - 8.5) / 8 * Math.PI)) * 2600 * (0.75 + 0.25 * Math.sin(i / 5)),
+      'sensor.house_power': (h, i) => 300 + 800 * Math.abs(Math.sin(i / 7)) * (h >= 17 && h < 22 ? 1.8 : 0.6),
       'sensor.gas_meter_gas_consumption': (h, i) => m.period==='hour' ? Math.max(0,0.25*Math.sin(i/3.5)+0.12) : 2.5+Math.sin(i)*0.9,
       'sensor.6fz463602f_generated_energy_total': (h) => (h>9&&h<16 ? 0.12 : 0),
       'sensor.electricity_import_total': (h) => (h>9&&h<16 ? 0.005 : 0.03),
@@ -50,7 +52,7 @@ const hass = { states, connected: true, config: {latitude: 52.37, longitude: 4.8
     };
     const out = {};
     for (const id of m.statistic_ids) out[id] = Array.from({length: n}, (_, i) => { const t = t0 + i*step, h = new Date(t).getHours(); const per = (m.period === 'hour' && /energy_total|import_total|export_total/.test(id) ? 12 : 1) * (0.6 + 0.4 * Math.sin(Math.floor(i * step / 86400e3) * 2.1) ** 2); // energy per hour, varies per day
-      const v = f[id] ? f[id](h, i) * (/price/.test(id) ? 1 : per) : 0; return {start: t, change: v, mean: v}; });
+      const v = f[id] ? f[id](h, i) * (/price/.test(id) ? 1 : per) : 0; return {start: t, change: v, mean: v, max: id === 'sensor.house_power' && i % 9 === 0 ? v + 1400 : v * 1.25}; });
     return out;
   } };
 const day0 = new Date(); day0.setHours(0,0,0,0); day0.setDate(day0.getDate()-1);
