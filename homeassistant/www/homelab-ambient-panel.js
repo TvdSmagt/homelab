@@ -583,9 +583,13 @@ canvas.on { opacity: 1; }
 .gh i.z { background: rgba(255, 255, 255, .12); }
 .ghx { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-top: 4px; }
 .gd { flex: 1; min-height: 0; display: flex; gap: 8px; margin-top: 6px; }
-.gd > div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
-.gd em { font-style: normal; font-size: 14px; color: var(--muted); margin-bottom: 3px; white-space: nowrap; }
-.gd i { width: 100%; min-height: 2px; border-radius: 5px 5px 0 0; background: rgba(255, 138, 76, .45); transition: height 1s ease; }
+.gd > div { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+/* The bar area on its own, so the bar height is a share of it and not of the column with the labels. */
+.gd b { flex: 1; min-height: 0; width: 100%; position: relative; margin-top: 20px; border-bottom: 1px solid var(--faint); }
+.gd em { position: absolute; left: 0; right: 0; bottom: calc(var(--h) + 3px); text-align: center; font-style: normal;
+  font-size: 14px; color: var(--muted); white-space: nowrap; transition: bottom 1s ease; }
+.gd i { position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); min-height: 2px; border-radius: 5px 5px 0 0;
+  background: rgba(255, 138, 76, .45); transition: height 1s ease; }
 .gd .now i { background: linear-gradient(180deg, #ffb27a, #e8642c); }
 .gd .now em, .gd .now span { color: var(--text); }
 .gd span { font-size: 15px; color: var(--muted); margin-top: 4px; }
@@ -1626,8 +1630,12 @@ class HomelabAmbientPanel extends HTMLElement {
     e['g-score'].innerHTML = T0 ? series('sc', 'g-part sc') + series('pr', 'g-part pr') + series('score', 'g-score') : '';
   }
 
-  // Gas per hour and per day from the recorder's long-term statistics of the meter reading.
-  // The P1 gas meter reports about once an hour, so the newest hour can still be empty.
+  // Gas per day from the recorder's long-term statistics of the meter reading; per hour from the readings themselves.
+  // The P1 gas meter reports once an hour, around the full hour but a few seconds before or after it (05:59:55,
+  // 07:00:02). The hourly statistics then put two readings in one hour and none in the next: an empty bar next to a
+  // double one. So each reading counts as the meter at the nearest full hour, and the difference between two
+  // readings is the gas of the hour(s) in between (spread evenly when a reading is missing). The current hour has
+  // no end reading yet, so its bar stays empty until the next full hour.
   async _loadGas() {
     if (this._gasLoading || !this._hass.callWS || !this._c.gas) return;
     this._gasLoading = true;
@@ -1647,7 +1655,33 @@ class HomelabAmbientPanel extends HTMLElement {
         period,
         types: ['change'],
       });
-      const [hr, dr] = await Promise.all([ask(h0, 'hour'), ask(d0, 'day')]);
+      const [hist, dr] = await Promise.all([
+        this._hass.callWS({
+          type: 'history/history_during_period',
+          start_time: new Date(h0.getTime() - 2 * 3600000).toISOString(),
+          entity_ids: [id],
+          minimal_response: true,
+          no_attributes: true,
+          significant_changes_only: false,
+        }),
+        ask(d0, 'day'),
+      ]);
+      const H = 3600000;
+      const hourVals = new Array(24).fill(0);
+      const reads = (hist[id] || [])
+        .map((r) => [Math.round(((r.lu ?? r.lc) * 1000) / H) * H, parseFloat(r.s)])
+        .filter(([, v]) => !Number.isNaN(v));
+      for (let k = 1; k < reads.length; k++) {
+        const [ta, va] = reads[k - 1];
+        const [tb, vb] = reads[k];
+        const d = vb - va;
+        if (!(d > 0)) continue; // same reading again, or a meter reset
+        const n = Math.max(1, (tb - ta) / H); // hours between the two readings
+        for (let j = 0; j < n; j++) {
+          const i = Math.round((tb - (j + 1) * H - h0.getTime()) / H); // the hour that ends j hours before tb
+          if (i >= 0 && i < 24) hourVals[i] += d / n;
+        }
+      }
       const slots = (rows, t0, n, next) => {
         const out = new Array(n).fill(0);
         const starts = [];
@@ -1664,7 +1698,7 @@ class HomelabAmbientPanel extends HTMLElement {
         return { starts, vals: out };
       };
       this._gasData = {
-        hours: slots(hr[id], h0, 24, (t) => new Date(t.getTime() + 3600000)),
+        hours: { starts: Array.from({ length: 24 }, (_, i) => h0.getTime() + i * H), vals: hourVals },
         days: slots(dr[id], d0, 7, (t) => { const d = new Date(t); d.setDate(d.getDate() + 1); return d; }),
       };
       this._cache.gas = null;
@@ -1698,12 +1732,13 @@ class HomelabAmbientPanel extends HTMLElement {
     const hl = [0, 6, 12, 18].map((i) => `<span>${hhmm(new Date(g.hours.starts[i]))}</span>`);
     e['gas-hx'].innerHTML = `${hl.join('')}<span>nu</span>`;
     const dv = g.days.vals.slice();
-    if (today != null) dv[6] = today; // the live daily counter is ahead of the hourly statistics
+    if (today != null) dv[6] = today; // the live daily counter is ahead of the statistics
     const dmax = Math.max(0.5, ...dv);
     e['gas-d'].innerHTML = dv
       .map((v, i) => {
         const day = i === 6 ? 'nu' : new Date(g.days.starts[i]).toLocaleDateString(NL, { weekday: 'short' }).replace('.', '');
-        return `<div class="${i === 6 ? 'now' : ''}"><em>${fmt(v, 1)}</em><i style="height:${Math.max(2, (v / dmax) * 100).toFixed(0)}%"></i><span>${day}</span></div>`;
+        const h = Math.max(2, (v / dmax) * 100).toFixed(0);
+        return `<div class="${i === 6 ? 'now' : ''}"><b style="--h:${h}%"><em>${fmt(v, 1)}</em><i></i></b><span>${day}</span></div>`;
       })
       .join('');
   }
