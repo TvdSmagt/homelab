@@ -23,7 +23,7 @@ input_boolean:
     name: Zonneverwarming actief
     icon: mdi:heat-pump
 
-# No `initial:`, so values set in the UI survive a restart (defaults were set once: 21 °C, 1000 W, 500 W, 700 W; max fan medium).
+# No `initial:`, so values set in the UI survive a restart (defaults: 19 °C, 600 W, 500 W, 700 W; max fan medium).
 input_number:
   solar_heating_target:
     name: Zonneverwarming doeltemperatuur
@@ -126,7 +126,7 @@ automation:
       - trigger: template
         value_template: >-
           {{ states('sensor.grid_net_power_5_min_average') | float(0)
-             < -(states('input_number.solar_heating_start_export') | float(1000)) }}
+             < -(states('input_number.solar_heating_start_export') | float(600)) }}
         for: { minutes: 2 }
       - trigger: time_pattern
         minutes: "/5"
@@ -146,11 +146,11 @@ automation:
       - condition: template
         value_template: >-
           {{ states('sensor.grid_net_power_5_min_average') | float(0)
-             < -(states('input_number.solar_heating_start_export') | float(1000)) }}
+             < -(states('input_number.solar_heating_start_export') | float(600)) }}
       - condition: template
         value_template: >-
           {{ states('sensor.beneden_beneden_temperature') | float(99)
-             < states('input_number.solar_heating_target') | float(21) - 0.5 }}
+             < states('input_number.solar_heating_target') | float(19) - 0.5 }}
     actions:
       - action: logbook.log
         data:
@@ -163,11 +163,27 @@ automation:
       - action: climate.set_hvac_mode
         target: { entity_id: climate.airco_beneden }
         data: { hvac_mode: heat }
+      # The LG ThinQ cloud takes up to a few minutes to report the airco as on, and until it does
+      # set_temperature fails (the integration does not know the temperature step yet), so the airco would run
+      # at its last setpoint (once 30 °C). HA only polls the cloud now and then, so ask for a refresh every 10 s
+      # until the airco shows as heating (at most 5 min); if it never does, set it anyway.
+      - repeat:
+          sequence:
+            - delay: { seconds: 10 }
+            - action: homeassistant.update_entity
+              target: { entity_id: climate.airco_beneden }
+              continue_on_error: true
+          until:
+            - condition: template
+              value_template: >-
+                {{ (is_state('climate.airco_beneden', 'heat')
+                    and state_attr('climate.airco_beneden', 'temperature') is not none)
+                   or repeat.index >= 30 }}
       - delay: { seconds: 5 }
       - action: climate.set_temperature
         target: { entity_id: climate.airco_beneden }
         data:
-          temperature: "{{ states('input_number.solar_heating_target') | float(21) }}"
+          temperature: "{{ states('input_number.solar_heating_target') | float(19) }}"
       - delay: { seconds: 5 }
       - action: climate.set_fan_mode
         target: { entity_id: climate.airco_beneden }
@@ -187,7 +203,7 @@ automation:
         id: warm
         value_template: >-
           {{ states('sensor.beneden_beneden_temperature') | float(0)
-             >= states('input_number.solar_heating_target') | float(21) }}
+             >= states('input_number.solar_heating_target') | float(19) }}
         for: { minutes: 5 }
       - trigger: sun
         id: sunset
@@ -259,7 +275,7 @@ automation:
       - action: climate.set_temperature
         target: { entity_id: climate.airco_beneden }
         data:
-          temperature: "{{ states('input_number.solar_heating_target') | float(21) }}"
+          temperature: "{{ states('input_number.solar_heating_target') | float(19) }}"
 
   # Fan speed follows the surplus that is left with the airco running. Every 10 minutes (the 5-minute average
   # needs time to show the effect of the last step): one step up while export stays above the threshold, up

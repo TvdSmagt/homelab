@@ -16,11 +16,18 @@ automation uses Tado's `sensor.beneden_beneden_temperature` for the room tempera
 ## How it decides
 
 `sensor.grid_net_power` = P1 import minus export in W (positive = import), averaged over 5 minutes in
-`sensor.grid_net_power_5_min_average`.
+`sensor.grid_net_power_5_min_average`. The DSMR integration's option *time between updates* is set to 0 (UI,
+stored in `.storage`, not in YAML), so every telegram of the DSMR 4 meter (every 10 s) is used instead of one per 30 s.
+
+Measured 2026-11-27 evening, from the P1 meter (a dryer ran alongside; its ~470 W steps were subtracted):
+- 9 min at setpoint 30 °C (by mistake), fan low, room 16-17 °C: ~1.25 kW after 5 min, peak ~1.9 kW.
+- 20 min at setpoint 19 °C, fan low, room 18.4 -> 19.3 °C (Tado): ~0.7 kW in the first minutes, peak ~1.3 kW
+  around minute 6-8, then steady at ~0.55-0.6 kW once the room reached the setpoint. Standby after off: ~60 W.
+So the start threshold (export) roughly covers steady state, but the first ~10 minutes draw up to ~1.3 kW more.
 
 | | Condition |
 |---|---|
-| **Start** | average export > *start bij teruglevering* (1000 W) for 2 min, sun above the horizon, Tado downstairs < target - 0.5 °C, airco off |
+| **Start** | average export > *start bij teruglevering* (600 W) for 2 min, sun above the horizon, Tado downstairs < target - 0.5 °C, airco off |
 | **Stop** | average import > *stop bij afname* (500 W) for 10 min, or Tado downstairs >= target for 5 min, or sunset, or *Zonneverwarming* switched off |
 
 **Fan:** the airco starts on `low`. Every 10 minutes, if the 5-minute average still shows more export than
@@ -37,8 +44,8 @@ room reaches Tado's setpoint, it stops calling the boiler.
 ## Settings (helpers, in the UI)
 
 - *Zonneverwarming*: on/off for the whole thing.
-- *Zonneverwarming doeltemperatuur*: 21 °C, sent to the airco and used as the stop temperature.
-- *Zonneverwarming start bij teruglevering*: 1000 W.
+- *Zonneverwarming doeltemperatuur*: 19 °C (21 °C until 2026-11-27), sent to the airco and used as the stop temperature.
+- *Zonneverwarming start bij teruglevering*: 600 W (1000 W until 2026-11-27; lowered after measuring ~0.55-0.6 kW steady state).
 - *Zonneverwarming stop bij afname*: 500 W.
 - *Zonneverwarming ventilator hoger bij teruglevering*: 700 W.
 - *Zonneverwarming max ventilator*: medium.
