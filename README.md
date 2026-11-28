@@ -9,13 +9,20 @@ Home management stack for `home-pi` (Raspberry Pi, Debian 13, arm64), run with D
 | `homeassistant` | Home Assistant (host network), P1 smart meter cable on `/dev/ttyUSB0` | 8123 |
 | `otbr` | OpenThread Border Router on the ZBT-2 (host network) | 8081 (REST), 8083 (web) |
 | `matter-server` | Matter server for Home Assistant (host network) | 5580 |
-| `caddy` | HTTPS reverse proxy for Home Assistant, DuckDNS + Let's Encrypt ([docs/https.md](docs/https.md)) | 443 |
+| `caddy` | HTTPS reverse proxy for Home Assistant, DuckDNS + Let's Encrypt ([docs/https.md](docs/https.md)); serves the docs site | 443, 8000 |
 
 ```
 Growatt inverter ── ShineWiFi/LAN ──► grott:5279 ──► server.growatt.com:5279   (ShinePhone keeps working)
                                           │
                                           └──► mosquitto ──► Home Assistant
 ```
+
+## Documentation
+
+The pages in [`docs/`](docs/index.md) are also a website, built with [Zensical](https://zensical.org) and served by
+Caddy at `http://192.168.2.26:8000` (LAN only). Start with [docs/home-assistant/](docs/home-assistant/index.md) for how
+Home Assistant is set up. Rebuild after a change with `scripts/docs.sh`, preview while writing with
+`scripts/docs.sh serve` (`:8001`). Details: [docs/about-docs.md](docs/about-docs.md).
 
 ## Setup
 
@@ -109,6 +116,6 @@ mosquitto/            broker config
 grott/                grott config + HA extension
 homeassistant/        HA packages, jinja macros, YAML dashboards (mounted into the container)
 scripts/              helper scripts
-docs/                 device notes (smart-meter.md, matter-thread.md, nest-display.md, health-monitor.md, ...) and roadmap.md
+docs/                 documentation site (zensical.toml): Home Assistant setup, device notes (smart-meter.md, matter-thread.md, nest-display.md, health-monitor.md, ...) and roadmap.md
 data/                 runtime state (not committed)
 ```

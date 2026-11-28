@@ -7,3 +7,22 @@
 	}
 	reverse_proxy localhost:8123
 }
+
+# Documentation site (docs/, built by scripts/docs.sh into data/docs-site), see docs/about-docs.md.
+# https://docs.{$HA_DOMAIN} (DuckDNS subdomains resolve to the same LAN IP), and plain HTTP on :8000 as a fallback.
+(docs) {
+	root * /srv/docs
+	file_server
+}
+
+docs.{$HA_DOMAIN} {
+	tls {
+		dns duckdns {$DUCKDNS_TOKEN}
+		resolvers 1.1.1.1
+	}
+	import docs
+}
+
+:8000 {
+	import docs
+}

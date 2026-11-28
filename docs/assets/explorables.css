@@ -1,0 +1,60 @@
+/* Explorables (explorables.js). Colours from the Zensical theme, so light and dark both work. */
+.xp {
+  --ok: #2e9e5b; --bad: #d64545; --part: #d9902a;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: .5rem; padding: .7rem .9rem; margin: 1.2em 0; font-size: .72rem;
+  background: var(--md-code-bg-color);
+}
+.xp-h { font-weight: 700; margin-bottom: .5rem; }
+.xp-row { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin: .35rem 0; }
+.xp-l { margin-right: .3rem; color: var(--md-default-fg-color--light); }
+.xp-chip {
+  border: 1px solid var(--md-default-fg-color--lighter); border-radius: 1rem; padding: .12rem .6rem;
+  background: var(--md-default-bg-color); color: inherit; font: inherit; cursor: pointer;
+}
+.xp-chip:hover { border-color: var(--md-accent-fg-color); }
+.xp-chip.on { background: var(--md-primary-fg-color); color: var(--md-primary-bg-color); border-color: transparent; }
+.xp-chip.down { background: var(--bad); color: #fff; border-color: transparent; text-decoration: line-through; }
+.xp-chip.ghost { border-style: dashed; }
+.xp-sl { display: grid; grid-template-columns: 12rem 1fr 8rem; gap: .7rem; align-items: center; margin: .15rem 0; }
+.xp-sl input[type=range] { width: 100%; accent-color: var(--md-primary-fg-color); }
+.xp-sl input[type=text] {
+  font: inherit; color: inherit; background: var(--md-default-bg-color); padding: .15rem .4rem;
+  border: 1px solid var(--md-default-fg-color--lighter); border-radius: .25rem;
+}
+.xp-v { font-variant-numeric: tabular-nums; font-weight: 600; }
+.xp-ck { display: inline-flex; align-items: center; margin: .25rem 1rem .25rem 0; cursor: pointer; }
+.xp-ck input { accent-color: var(--md-primary-fg-color); }
+.xp-det { border-top: 1px dashed var(--md-default-fg-color--lightest); margin-top: .4rem; padding-top: .3rem; }
+.xp-b { display: inline-block; border-radius: .25rem; padding: 0 .4rem; font-weight: 600; color: #fff; min-width: 3.2rem; text-align: center; }
+.xp-b.ok { background: var(--ok); } .xp-b.bad { background: var(--bad); } .xp-b.part { background: var(--part); }
+.xp-list { display: grid; gap: .15rem; margin-top: .5rem; }
+.xp-li { display: grid; grid-template-columns: 4rem 16rem 1fr; gap: .6rem; align-items: baseline; }
+.xp-li small { color: var(--md-default-fg-color--light); }
+/* Status-slide look-alike */
+.xp-items { display: grid; gap: .4rem; margin-top: .5rem; }
+.xp-item { background: #1b2433; color: #e8edf5; border-radius: .4rem; padding: .45rem .7rem; border-left: 4px solid #8794a8; }
+.xp-item.warn { border-left-color: #ff6b6b; } .xp-item.ok { border-left-color: #3fd68f; }
+.xp-item b { display: block; } .xp-item div { opacity: .8; }
+.xp-dl { display: grid; grid-template-columns: 7rem 1fr; gap: .2rem .8rem; margin: .5rem 0 0; }
+.xp-dl dt { color: var(--md-default-fg-color--light); } .xp-dl dd { margin: 0; }
+.xp-dl pre, .xp-pre { margin: 0; }
+.xp-pre { padding: .4rem .6rem; background: var(--md-default-bg-color); border-radius: .25rem; }
+.xp-bars { display: grid; gap: .3rem; margin-top: .5rem; }
+.xp-bar { display: grid; grid-template-columns: 12rem 1fr 9rem; gap: .7rem; align-items: center; }
+.xp-bar > div { height: .7rem; background: var(--md-default-fg-color--lightest); border-radius: .2rem; overflow: hidden; }
+.xp-bar i { display: block; height: 100%; background: var(--md-primary-fg-color); transition: width .15s; }
+.xp-bar i.ok { background: var(--ok); } .xp-bar i.bad { background: var(--bad); }
+.xp-svg svg { width: 100%; max-height: 9rem; margin-top: .4rem; }
+.xp-svg text { font-size: 9px; fill: var(--md-default-fg-color--light); }
+.xp-svg .dem { fill: #ff8a4c; opacity: .25; }
+.xp-svg .tgt { stroke: var(--md-default-fg-color--light); stroke-dasharray: 4 3; }
+.xp-svg .cur { stroke: #ff8a4c; stroke-width: 3; }
+.xp-svg .exp { fill: var(--ok); opacity: .35; } .xp-svg .imp { fill: var(--bad); opacity: .3; }
+.xp-svg line.m1, .xp-svg line.m2, .xp-svg line.m3 { stroke: var(--md-default-fg-color); stroke-width: 1.5; }
+.xp-svg .now { fill: var(--md-primary-fg-color); stroke: var(--md-default-bg-color); stroke-width: 2; }
+.xp-shot { width: 100%; border-radius: .4rem; margin-top: .4rem; display: block; }
+@media (max-width: 40em) {
+  .xp-sl, .xp-bar { grid-template-columns: 1fr; gap: .1rem; }
+  .xp-li { grid-template-columns: 4rem 1fr; } .xp-li small { grid-column: 2; }
+}

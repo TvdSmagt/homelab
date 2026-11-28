@@ -102,6 +102,7 @@ services:
   # HTTPS reverse proxy for Home Assistant: Cast devices (Nest Hub) load the
   # HA Cast receiver over HTTPS, so HA must be reachable via HTTPS with a valid cert, see docs/https.md.
   # Host network: listens on 443 (and 80 for redirects), proxies to Home Assistant on localhost:8123.
+  # Also serves the documentation site on :8000 (docs/about-docs.md).
   caddy:
     build: ./caddy
     image: homelab-caddy:2.10.2-duckdns
@@ -112,6 +113,7 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./data/caddy/data:/data
       - ./data/caddy/config:/config
+      - ./data/docs-site:/srv/docs:ro   # documentation site on :8000, built by scripts/docs.sh
     environment:
       - TZ=${TZ}
       - HA_DOMAIN=${HA_DOMAIN}

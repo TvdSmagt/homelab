@@ -36,7 +36,7 @@ docker run --rm --device $DEV:/dev/zbt2 -v $FW:/fw:ro --entrypoint python ghcr.i
   and ip6tables/ipset rules). Thread data in `data/otbr`. Web UI on `:8083`.
 - `matter-server`: [matter-js/matterjs-server](https://github.com/matter-js/matterjs-server), the
   successor of the archived python-matter-server, same WebSocket API. Host network. Fabric data in
-  `data/matter-server` (**back this up** together with `data/otbr`, see [README](../README.md#backup): losing either means re-pairing every device). Dashboard on `:5580`.
+  `data/matter-server` (**back this up** together with `data/otbr`, see [README](home-assistant/maintenance.md#backup): losing either means re-pairing every device). Dashboard on `:5580`.
 
 ## Host (one time, needs sudo)
 

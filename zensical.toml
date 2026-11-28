@@ -1,0 +1,90 @@
+# Documentation site for the homelab, built with Zensical (https://zensical.org) from docs/.
+# Build and host: scripts/docs.sh (see docs/about-docs.md). Served on the LAN at http://192.168.2.26:8000.
+
+[project]
+site_name = "Homelab"
+site_description = "Home Assistant and the rest of the home-pi stack"
+site_url = "http://192.168.2.26:8000/"
+docs_dir = "docs"
+site_dir = "data/docs-site"
+repo_url = "https://github.com/TvdSmagt/homelab"
+repo_name = "homelab"
+edit_uri = "edit/main/docs/"
+extra_css = ["assets/explorables.css"]
+extra_javascript = ["assets/explorables.js"]
+
+nav = [
+  { "Home" = "index.md" },
+  { "Home Assistant" = [
+    "home-assistant/index.md",
+    "home-assistant/integrations.md",
+    "home-assistant/packages.md",
+    "home-assistant/maintenance.md",
+  ] },
+  { "Features" = [
+    "nest-display.md",
+    "health-monitor.md",
+    "solar-heating.md",
+    "smart-meter.md",
+  ] },
+  { "Hardware" = [
+    "growatt-datalogger.md",
+    "matter-thread.md",
+    "https.md",
+    "cv-ketel.md",
+  ] },
+  { "Roadmap" = "roadmap.md" },
+  { "About these docs" = "about-docs.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.betterem = {}
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.mark = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tasklist.custom_checkbox = true

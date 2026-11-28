@@ -10,7 +10,7 @@ Let's Encrypt ◄── DNS-01 challenge: caddy writes a TXT record via the Duck
 ```
 
 - **DuckDNS** (free) provides the name. Its A record points at the Pi's **LAN** IP, so the name only works at home.
-- **Caddy** (`compose.yaml` service `caddy`, built from [`caddy/Dockerfile`](../caddy/Dockerfile) with the DuckDNS
+- **Caddy** (`compose.yaml` service `caddy`, built from [`caddy/Dockerfile`](https://github.com/TvdSmagt/homelab/blob/main/caddy/Dockerfile) with the DuckDNS
   plugin) gets and renews the certificate and proxies to Home Assistant. Certificates live in `data/caddy/`.
 - Home Assistant trusts the proxy: `use_x_forwarded_for: true`, `trusted_proxies: [127.0.0.1/32, ::1/128]`.
   Since 2026 the HTTP settings live in the UI-managed store `.storage/http` (key `stable`), and an `http:` block

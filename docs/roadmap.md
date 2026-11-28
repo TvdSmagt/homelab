@@ -4,7 +4,7 @@ Planned additions to the stack, as of 2026-10-10.
 
 ## Done
 
-- Mosquitto, Grott, Home Assistant running ([README](../README.md)).
+- Mosquitto, Grott, Home Assistant running ([README](https://github.com/TvdSmagt/homelab#readme)).
 - Growatt ShineLAN redirected to Grott; inverter shows up in Home Assistant
   ([growatt-datalogger.md](growatt-datalogger.md)).
 - 2026-11-21: P1 cable connected and passed to Home Assistant ([smart-meter.md](smart-meter.md)).

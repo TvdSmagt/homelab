@@ -1,132 +1,45 @@
 # Nest Hub home screen
 
-An ambient dashboard for the Nest Hub in the dining room (`media_player.eetkamer_display`, 1024x600, touch).
+The Nest Hub in the dining room (`media_player.eetkamer_display`, 1024×600, touch) shows one full-screen custom
+element: [`homelab-ambient-panel.js`](https://github.com/TvdSmagt/homelab/blob/main/homeassistant/www/homelab-ambient-panel.js),
+view `/nest-hub/thuis` of [`dashboards/nest_hub.yaml`](https://github.com/TvdSmagt/homelab/blob/main/homeassistant/dashboards/nest_hub.yaml)
+(`?kiosk` for full screen in a browser). Helpers and automations: `packages/nest_display.yaml`.
 
-- Dashboard: [`homeassistant/dashboards/nest_hub.yaml`](../homeassistant/dashboards/nest_hub.yaml), *Nest Hub* in the
-  sidebar, `http://192.168.2.26:8123/nest-hub/thuis`. Registered under `lovelace: dashboards:` in `configuration.yaml`.
-- Helpers and the cast automation: [`homeassistant/packages/nest_display.yaml`](../homeassistant/packages/nest_display.yaml).
+A looping carousel: next slide every 60 s, paused 90 s after a touch, swipe to step. Buttons carry live badges.
+Screenshots below use the preview's mock data (icons show as blocks).
 
-The cast view (`thuis`) is one full-screen custom element with its own design, no HA cards:
-[`homeassistant/www/homelab-ambient-panel.js`](../homeassistant/www/homelab-ambient-panel.js). It is drawn at
-1024x600 and scaled to fit other screens. In a normal browser it sits under the HA header; add `?kiosk` to the URL
-to make it full screen (on the Nest it always is).
+<div data-xp="slides"></div>
 
-It is a looping carousel of full-screen slides, one subject per slide in large type so it reads from across the
-room. The bar at the bottom shows the time and has a button per slide; swipe left / right to step through the loop.
-It advances on its own every 60 s (a line under the active button counts down) and pauses for 90 s after any touch.
-The buttons carry live badges: energy state colour, a blue dot when rain is coming, the number of rooms heating and
-of lights on.
+Card options in the dashboard YAML: `rotate`, `resume_after`, `rotate_slides`, `start`; entities, rooms and lights
+default at the top of the JS and can be overridden per key. The older card version is view `kaarten`.
 
-| Slide | Shows |
-|---|---|
-| Background | Live sky: colour follows the real sun elevation (computed from the home location), a glow where the sun is, stars at night, drifting clouds by weather condition, falling rain when the radar says it rains now. Dimmed a bit after 21:00 |
-| Nu | Big clock and date, weather now (animated icon, actual moon phase at night, wind in Bft, humidity), day arc with sunrise / sunset; tiles for rain next 2 hours (opens Weer) and solar today vs forecast (tap to open that slide) |
-| Energie | Status line ("We leveren terug", "Stroom van het net"), animated solar / grid / house flow with usage now, energy score of the last 24 hours with its two parts, dynamic electricity price per hour, today 00:00-24:00 and from 18:00 until 18:00 tomorrow (green cheap to red expensive, past hours dimmed, current hour outlined) with the cheapest 3-hour block from now on marked *goedkoop* |
-| Vandaag | One 24 h graph: solar vs house power (left axis, from the 5-minute statistics of `sensor.6fz463602f_pv_output_actual` and `sensor.house_power`, with the 5-minute max of the house as a soft band so short peaks show; the live value as the last point), the energy score at each hour with both parts (right axis, 0-100) and the dynamic price per hour as tinted bars behind (green = cheapest, red = dearest of the window, range in the legend). The score of the last 24 hours in the header; today's totals (usage, import, export, gas, cost) |
-| Verleden | The last 7 days. **Vast vs dynamisch**: how much cheaper or dearer the dynamic contract would have been since 2026-11-21 (live from `sensor.fixed_contract_total_cost` / `sensor.dynamic_contract_total_cost`, package `energy_contract.yaml`), the monthly estimate, and the difference per day. **Energiescore per dag**: the score per calendar day with both parts (needs 12 hours of P1 data, today 3). **Verbruik per dag**: solar, grid import and export (kWh), gas (m³); today from the live daily counters. All from the hourly long-term statistics, so it fills up as history grows (P1 since 2026-11-21) |
-| Weer | Forecast for the next 12 hours (time, icon, temperature, rain in mm) and the next days (icon, high / low with a bar on the week's scale, rain in mm) from `weather.forecast_home` (met.no, via the `weather/subscribe_forecast` websocket subscription), and the rain next 2 hours (Buienradar, from KNMI radar) as a graph at the bottom |
-| Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days; airco downstairs: AUTO (solar heating on/off), power, - / + target ([solar-heating.md](solar-heating.md)) |
-| Lampen | Lights (tap toggles) and scenes Relax / Gedimd / Fel / Uit. Not in the auto-rotation |
-| Status | What is wrong: a room that does not warm up, the boiler not firing, Tado / Hue devices offline, batteries (with the type to buy). The button only shows when there is something to list; problems join the rotation and a new one comes to the front once ([health-monitor.md](health-monitor.md)) |
+<div data-xp="cast"></div>
 
-Carousel options in the card config (set in `dashboards/nest_hub.yaml`, view `thuis`): `rotate` (seconds per slide, 0 = off), `resume_after` (seconds after a touch),
-`rotate_slides` (which slides the auto-rotation visits), `start` (first slide).
+*Not connected* now and then is a pychromecast reconnect loop after a network blip; the automation *Nest Hub - fix
+cast reconnect loop* catches the log warning, reloads Cast and casts again. Cast needs HTTPS with a valid
+certificate ([HTTPS](https.md)).
 
-**Phases:** the P1 power values (`power_consumption` / `power_production`) are summed per direction over the three
-phases, so one phase can import while another exports and both are non-zero at once. The meter registers (what the
-supplier bills, and what the daily counters and the energy score use) net the phases. The panel therefore shows the
-net flow: import minus export. `sensor.house_power` already does the same.
+## Energy score
 
-The price graph uses the EnergyZero market prices (`sensor.energyzero_electricity_prices`, yesterday to tomorrow)
-with the same all-in formula as `sensor.dynamic_electricity_price`: (market + 0.020) x 1.21 + 0.11085 per kWh
-(`price_markup`, `price_vat`, `price_tax` in the card config). The day-ahead auction closes at 12:00 and EnergyZero has tomorrow's prices
-around 14:00-15:00 (the REST sensor polls every 15 minutes), so the graph switches to 18:00-18:00 at 18:00
-(`price_evening`); `cheap_hours` sets the block length.
+<div data-xp="score"></div>
 
-The gas graphs come from the recorder's long-term statistics of `sensor.gas_meter_gas_consumption` (hourly and daily
-`change`), reloaded every 15 minutes. The P1 gas meter reports about once an hour, so the newest hour can lag; today's
-bar uses the live `sensor.gas_today` counter instead.
+Computed in the panel over a rolling 24 h from the 5-minute statistics, per hour for the Vandaag graph; needs 12 hours
+of data. Until those load it shows `sensor.energy_score_today` (from midnight). Prices: the dynamic all-in price
+([Smart meter](smart-meter.md)); after 18:00 the price graph shows 18:00 until 18:00 tomorrow.
 
-Entities, rooms, lights and scenes are defaults in the top of the JS file and can be overridden per key in the
-card config. The earlier version built from HA cards is kept as view `kaarten` (`/nest-hub/kaarten`).
+## Notes
 
-The - / + buttons collect presses for 2 s and send one `climate.set_temperature` per room (Tado limits API calls per day).
+- **Power** is net over the three phases (import − export), like `sensor.house_power`.
+- **Gas** graphs come from hourly statistics; the meter reports hourly, so today uses `sensor.gas_today`.
+- **Tado − / +** presses are collected for 2 s and sent as one call (API limit).
+- **Burn-in:** LCD, screen off at night, layout shifts up to 5 px every 5 minutes.
 
-It is interactive on the Nest Hub: taps go to Home Assistant as on any dashboard. There is no keyboard.
-"Hey Google", timers and other media replace the cast; the automation puts it back every 5 minutes between
-07:00 and 22:30 when nothing else is playing; at 22:30 a second automation stops it.
+## Change and deploy
 
-**"Not connected" every now and then:** a pychromecast bug. After a network blip HA reconnects to the Nest
-and then waits, inside its own socket thread, for an answer that only this thread can read. The wait times
-out, HA connects again, and this repeats every 30 s. Each time the receiver logs in again and briefly shows
-"Not connected"; the log fills with `_connect_hass failed`. The automation *Nest Hub - fix cast reconnect
-loop* catches that warning (via `system_log: fire_event`), reloads the cast integration and casts once more.
+```sh
+scripts/panel-preview.sh            # screenshots of all slides from mock data, no HA needed
+scripts/deploy-panel.sh             # bump ?v=, reload resources, restart the dashboard on the Nest
+```
 
-### Files
-
-- [`homelab-ambient-panel.js`](../homeassistant/www/homelab-ambient-panel.js): the full-screen panel (`custom:homelab-ambient-panel`).
-- [`homelab-energy-card.js`](../homeassistant/www/homelab-energy-card.js): the separate cards of the `kaarten` view
-  (`homelab-energy-flow-card`, `homelab-climate-card`, `homelab-rain-card`).
-
-No dependencies (the font, Outfit, comes from Google Fonts, with Roboto as fallback). `homeassistant/www` is mounted
-at `/config/www` and the files are loaded as `/local/<file>?v=N` (`lovelace: resource_mode: yaml` + `resources:` in
-`configuration.yaml`). The Nest caches them, so every change needs a new `?v=`. **Deploy with
-`scripts/deploy-panel.sh`**: it sets `?v=` to a hash of each changed file, reloads the resources
-(`lovelace.reload_resources`) and restarts the dashboard on the Nest Hub. That needs `HA_TOKEN` in `.env` (long-lived
-access token of an admin user, *profile → Security*); without it the script restarts Home Assistant instead and you run
-the script *Nest Hub: herstart dashboard* (below) yourself. `--restart` forces a restart. A new resource (a new file)
-still has to be added to `configuration.yaml` by hand.
-
-### Preview without Home Assistant
-
-[`scripts/panel-preview/index.html`](../scripts/panel-preview/index.html) loads the panel with mock states and
-statistics. Open it in a browser (`#energie`, `#verleden`, ... picks the slide), or make 1024 x 600 screenshots of
-all slides with `scripts/panel-preview.sh` (Chromium, headless; `scripts/panel-preview.sh verleden` for one). When
-the panel starts reading a new entity or statistic, add it to the mock.
-
-### Burn-in
-
-The Nest Hub has an LCD, so burn-in is unlikely; at most temporary image retention after many static hours.
-The screen is off from 22:30 to 07:00, and the layout shifts by up to 5 px every 5 minutes in a slow loop (only on
-the Cast receiver, detected by `cast.home-assistant.io` / `CrKey`, or with `?kiosk`). The clock, sky and animations
-change all the time anyway.
-
-### Energy score (0-100, last 24 hours)
-
-Average of two parts (price timing alone when there was less than 0.1 kWh of solar):
-- **Eigen zon zelf gebruikt** (self consumption): share of the solar used in the house instead of exported.
-- **Slim getimed** (price timing): 50 + 100 x (midpoint - paid per kWh) / (dearest - cheapest hour, at least € 0.03),
-  midpoint = (dearest + cheapest) / 2. 100 = all grid import at the cheapest hour of the window, 0 = all at the dearest,
-  linear in between. When the hour prices are less than 3 ct apart it stays near 50: timing hardly matters then. Paid per kWh =
-  each hour's grid import x that hour's dynamic all-in price, divided by the total import. Not from the dynamic cost
-  counter: that one jumped when it was created (2026-11-21 17:00). (Until 2026-11-22 the formula was
-  50 + 50 x (average - paid) / (average - cheapest), which punished hard on days with flat prices.)
-
-The panel computes it over a rolling 24 hours from the recorder's 5-minute statistics of the solar, import and export
-totals, bucketed per hour (prices from the EnergyZero list, older hours from
-the statistics of `sensor.dynamic_electricity_price`), every 5 minutes. It does the same for each of the last 24 hours
-for the graph on the Vandaag slide (total, and both parts as dotted lines). It needs at least 12 hours of data in the window. Until those statistics load it shows the HA sensors, which count from midnight:
-`sensor.energy_score_today`, `sensor.self_consumption_today`, `sensor.price_timing_score_today` (package
-`nest_display.yaml`, also used by the `kaarten` view). Statistics start 2026-11-21 17:00, so the first graph is short.
-The Verleden slide uses the same two parts per calendar day, from the hourly statistics.
-
-### Start it yourself
-
-Script **Nest Hub: toon dashboard** (`script.nest_hub_show_dashboard`) casts it immediately, e.g. from a
-Home Assistant Companion app widget on the phone.
-
-Script **Nest Hub: herstart dashboard** (`script.nest_hub_restart_dashboard`) closes the cast app and casts again, so the
-Nest loads everything fresh: use it after a new version of the JS file or a change in `dashboards/nest_hub.yaml`.
-
-## Requirement: HTTPS
-
-Home Assistant Cast loads the dashboard from an `https://` receiver page, so Home Assistant must be reachable
-over HTTPS with a valid certificate (not a self-signed one). Until then `cast.show_lovelace_view` fails with
-*"requires your instance to be reachable via HTTPS"* and the automation is off (`initial_state: false`).
-
-Options:
-1. **Home Assistant Cloud** (Nabu Casa, paid): sign in under *Settings → Home Assistant Cloud*. Also gives remote access.
-2. **DuckDNS + Let's Encrypt** (free, chosen): Caddy reverse proxy on the Pi, see [https.md](https.md).
-
-Then remove `initial_state: false`, restart, and enable the automation once (*Settings → Automations*).
-Manual test: *Developer tools → Actions → `cast.show_lovelace_view`* with `dashboard_path: nest-hub`, `view_path: thuis`.
+New entities in the panel go into the mock (`scripts/panel-preview/index.html`) too. Script *Nest Hub: toon
+dashboard* casts now (phone widget); *Nest Hub: herstart dashboard* reloads it.
