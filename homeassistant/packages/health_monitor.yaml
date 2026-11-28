@@ -1,0 +1,109 @@
+# Health monitor: one sensor that lists what is wrong in the house, shown on the Status slide of the Nest Hub
+# panel (homeassistant/www/homelab-ambient-panel.js). Docs: docs/health-monitor.md.
+#
+# sensor.home_health
+#   state       number of problems (level "warn"); these make the Status slide appear in the rotation
+#   items       list of {level: warn|info, icon, title, detail, entity}, warnings first
+#   info_count  number of notes (level "info"): low batteries, unreachable lamps; listed, no alarm
+#
+# Checks
+#   heating     a Tado room asked for heat for 2 hours (average demand >= 50 %), is still >= 0.3° below its
+#               target and rose < 0.3° in those 2 hours: valve stuck, radiator air, window open, valve battery
+#   boiler      some room asks for heat (as above) but the gas meter did not move for 3 hours
+#   Tado        integration unavailable (cloud / API limit), or a device (valve, thermostat, bridge) offline
+#   Hue         bridge unreachable, a switch offline (usually an empty battery), a lamp unreachable (info)
+#   batteries   info only, with the battery type to buy: Hue switch <= 5 %, Tado battery "low"
+# Offline / unavailable only counts after 10 minutes (lamps 30), so restarts and blips stay quiet.
+
+sensor:
+  # Rise of each room's temperature over the last 2 hours, and the time-weighted heating demand.
+  # keep_last_sample: a value that did not change in 2 hours still counts (change 0, average = that value).
+  - platform: statistics
+    name: Woonkamer temperatuur stijging 2u
+    unique_id: health_woonkamer_temp_change_2h
+    entity_id: sensor.woonkamer_woonkamer_temperature
+    state_characteristic: change
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Woonkamer warmtevraag 2u
+    unique_id: health_woonkamer_heating_avg_2h
+    entity_id: sensor.woonkamer_woonkamer_heating
+    state_characteristic: average_step
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Beneden temperatuur stijging 2u
+    unique_id: health_beneden_temp_change_2h
+    entity_id: sensor.beneden_beneden_temperature
+    state_characteristic: change
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Beneden warmtevraag 2u
+    unique_id: health_beneden_heating_avg_2h
+    entity_id: sensor.beneden_beneden_heating
+    state_characteristic: average_step
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Bibliotheek temperatuur stijging 2u
+    unique_id: health_bibliotheek_temp_change_2h
+    entity_id: sensor.bibliotheek_bibliotheek_temperature
+    state_characteristic: change
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Bibliotheek warmtevraag 2u
+    unique_id: health_bibliotheek_heating_avg_2h
+    entity_id: sensor.bibliotheek_bibliotheek_heating
+    state_characteristic: average_step
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Kleine kamer temperatuur stijging 2u
+    unique_id: health_kleine_kamer_temp_change_2h
+    entity_id: sensor.kleine_kamer_kleine_kamer_temperature
+    state_characteristic: change
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  - platform: statistics
+    name: Kleine kamer warmtevraag 2u
+    unique_id: health_kleine_kamer_heating_avg_2h
+    entity_id: sensor.kleine_kamer_kleine_kamer_heating
+    state_characteristic: average_step
+    max_age: { hours: 2 }
+    sampling_size: 500
+    keep_last_sample: true
+  # Gas over 3 hours: the P1 gas meter reports about once an hour, so 2 hours could hold a single reading.
+  - platform: statistics
+    name: Gas verbruik 3u
+    unique_id: health_gas_change_3h
+    entity_id: sensor.gas_meter_gas_consumption
+    state_characteristic: change
+    max_age: { hours: 3 }
+    sampling_size: 500
+    keep_last_sample: true
+
+template:
+  - sensor:
+      - name: Home health
+        unique_id: home_health
+        icon: mdi:shield-check
+        state: >-
+          {% from 'health.jinja' import health_items %}
+          {{ health_items() | from_json | selectattr('level', 'eq', 'warn') | list | count }}
+        attributes:
+          items: >-
+            {% from 'health.jinja' import health_items %}
+            {{ health_items() | from_json }}
+          info_count: >-
+            {% from 'health.jinja' import health_items %}
+            {{ health_items() | from_json | selectattr('level', 'eq', 'info') | list | count }}

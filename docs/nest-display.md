@@ -27,6 +27,7 @@ of lights on.
 | Weer | Forecast for the next 12 hours (time, icon, temperature, rain in mm) and the next days (icon, high / low with a bar on the week's scale, rain in mm) from `weather.forecast_home` (met.no, via the `weather/subscribe_forecast` websocket subscription), and the rain next 2 hours (Buienradar, from KNMI radar) as a graph at the bottom |
 | Klimaat | All Tado rooms: current and target temperature with big - / +, heating glow, outdoor temperature, hot water; gas use today (with cost at the fixed contract price), per hour for the last 24 h and per day for the last 7 days; airco downstairs: AUTO (solar heating on/off), power, - / + target ([solar-heating.md](solar-heating.md)) |
 | Lampen | Lights (tap toggles) and scenes Relax / Gedimd / Fel / Uit. Not in the auto-rotation |
+| Status | What is wrong: a room that does not warm up, the boiler not firing, Tado / Hue devices offline, batteries (with the type to buy). The button only shows when there is something to list; problems join the rotation and a new one comes to the front once ([health-monitor.md](health-monitor.md)) |
 
 Carousel options in the card config (set in `dashboards/nest_hub.yaml`, view `thuis`): `rotate` (seconds per slide, 0 = off), `resume_after` (seconds after a touch),
 `rotate_slides` (which slides the auto-rotation visits), `start` (first slide).

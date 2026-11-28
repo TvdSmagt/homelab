@@ -23,6 +23,10 @@
 //                for the airco downstairs with power, an AUTO toggle (heat on solar surplus,
 //                packages/solar_heating.yaml) and - / + for its target
 //   Lampen       lights and scenes
+//   Status       what is wrong (sensor.home_health, packages/health_monitor.yaml): a room that does not warm up,
+//                the boiler not firing, Tado / Hue devices offline, batteries to replace (with the type). Its
+//                button only shows when there is something to list; problems add it to the rotation, and a new
+//                problem brings it to the front once
 //
 // On the Cast receiver (or with ?kiosk in the URL) it covers the whole screen and shifts a few pixels
 // every 5 minutes against burn-in. Served as /local/homelab-ambient-panel.js; bump ?v= in
@@ -97,6 +101,7 @@ const DEFAULTS = {
     { entity: 'scene.beneden_bright', name: 'Fel', icon: 'mdi:white-balance-sunny' },
     { off: 'light.beneden', name: 'Uit', icon: 'mdi:power' },
   ],
+  health: 'sensor.home_health', // Status slide; attribute `items` (packages/health_monitor.yaml)
   graph_hours: 24,
   forecast_hours: 12, // Weer: hours in the hourly row
   temp_step: 0.5,
@@ -280,6 +285,7 @@ const SLIDES = [
   { id: 'weer', name: 'Weer', icon: 'mdi:weather-partly-rainy', ac: '#6fb8ff' },
   { id: 'klimaat', name: 'Klimaat', icon: 'mdi:thermostat', ac: '#ff8a4c' },
   { id: 'lampen', name: 'Lampen', icon: 'mdi:lightbulb-group', ac: '#ffc46b' },
+  { id: 'status', name: 'Status', icon: 'mdi:alert-circle-outline', ac: '#ff6b6b' }, // hidden while all is well
 ];
 const GW = 940; // graph viewBox
 const GH = 200;
@@ -348,6 +354,7 @@ canvas.on { opacity: 1; }
   justify-content: center; gap: 3px; color: var(--muted); position: relative; overflow: hidden;
   transition: background .4s, color .4s, transform .15s; }
 .nb:active { transform: scale(.94); }
+.nb.gone { display: none; }
 .nb ha-icon { --mdc-icon-size: 27px; transition: color .4s; }
 .nb span { font-size: 15.5px; font-weight: 500; }
 .nb.on { background: rgba(255, 255, 255, .13); color: var(--text); }
@@ -640,6 +647,25 @@ canvas.on { opacity: 1; }
 .acb.pend { opacity: .6; }
 .acb:disabled { opacity: .25; }
 
+/* ── Status ── */
+.hlist { flex: 1; display: grid; grid-auto-rows: minmax(0, 92px); gap: 10px; min-height: 0; align-content: start; }
+.hlist.two { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, 104px); }
+.hi { display: flex; align-items: center; gap: 16px; padding: 10px 20px 10px 16px; border-radius: 22px; text-align: left; min-width: 0; }
+.hi .i { width: 52px; height: 52px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: rgba(255, 255, 255, .08); color: var(--muted); }
+.hi .i ha-icon { --mdc-icon-size: 30px; }
+.hi.warn { background: linear-gradient(100deg, rgba(255, 107, 107, .3), rgba(255, 107, 107, .05) 70%), var(--glass);
+  border-color: rgba(255, 107, 107, .4); }
+.hi.warn .i { background: #ff6b6b; color: #2a0505; box-shadow: 0 0 24px rgba(255, 107, 107, .5); }
+.hi .tt { min-width: 0; }
+.hi b { display: block; font-size: 22px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hi small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 16px; line-height: 1.3; color: var(--muted); margin-top: 3px; }
+.hlist.two .hi small { -webkit-line-clamp: 3; font-size: 15px; }
+.hok { flex: 1; display: grid; place-items: center; align-content: center; gap: 12px; font-size: 26px; color: var(--muted); }
+.hok ha-icon { --mdc-icon-size: 72px; color: var(--export); }
+.hmore { font-size: 16px; color: var(--muted); padding: 0 6px; flex: none; }
+
 /* ── Lampen ── */
 .lgrid { flex: 1; display: grid; gap: 14px; min-height: 0; }
 .lt { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 14px 10px;
@@ -929,6 +955,11 @@ class HomelabAmbientPanel extends HTMLElement {
           <div class="shead"><h2>Lampen</h2><span id="lcount"></span></div>
           <div class="lgrid" id="lgrid" style="grid-template-columns:repeat(${Math.min(4, c.lights.length) || 1}, 1fr)"></div>
           <div class="scenes">${scenes}</div>`)}
+
+        ${slide('status', `
+          <div class="shead"><h2>Status</h2><span id="hsub"></span></div>
+          <div class="hlist" id="hlist"></div>
+          <div class="hmore" id="hmore"></div>`)}
         </div>
         <nav class="nav"><div class="ntime" id="ntime"></div>${nav}</nav>
       </div>
@@ -937,6 +968,7 @@ class HomelabAmbientPanel extends HTMLElement {
     const $ = (id) => this._root.getElementById(id);
     this._el = new Proxy({}, { get: (o, k) => o[k] || (o[k] = $(k)) });
     this._navs = [...this._root.querySelectorAll('.nb')];
+    this._statusI = SLIDES.findIndex((s) => s.id === 'status');
     this._idx = clamp(SLIDES.findIndex((s) => s.id === c.start), 0, SLIDES.length - 1);
     this._place(this._idx, 0, 0, false);
     this._slide(this._idx).classList.add('on');
@@ -1063,6 +1095,10 @@ class HomelabAmbientPanel extends HTMLElement {
     for (let k = 1; k <= n; k++) {
       const i = (this._idx + k) % n;
       const id = SLIDES[i].id;
+      if (id === 'status') {
+        if (this._warnN > 0) return i; // problems always join the rotation
+        continue;
+      }
       if (Array.isArray(list) && !list.includes(id)) continue;
       return i;
     }
@@ -1354,6 +1390,7 @@ class HomelabAmbientPanel extends HTMLElement {
     this._priceRender();
     this._scoreRender();
     this._pastRender();
+    this._health();
     this._el.offline.classList.toggle('on', this._hass.connected === false);
   }
 
@@ -2401,6 +2438,84 @@ class HomelabAmbientPanel extends HTMLElement {
     this._set('water', this._el.water, w ? `<ha-icon icon="mdi:water-boiler"></ha-icon>warm water ${won ? 'aan' : 'uit'}` : '');
     const out = num(h, this._c.outdoor);
     this._set('outdoor', this._el.outdoor, out == null ? '' : `<ha-icon icon="mdi:thermometer"></ha-icon>buiten ${fmt(out, 1)}°`);
+  }
+
+  // Status slide: the list from sensor.home_health. Warnings first (red), notes after (quiet).
+  _health() {
+    const s = this._hass.states[this._c.health];
+    const items = (s && Array.isArray(s.attributes.items) ? s.attributes.items : []).filter((x) => x && x.title);
+    const warn = items.filter((x) => x.level === 'warn').length;
+    const info = items.length - warn;
+    const prev = this._warnN;
+    this._warnN = warn;
+    const nb = this._navs[this._statusI];
+    const show = items.length > 0 || this._idx === this._statusI;
+    nb.classList.toggle('gone', !show);
+    this._badge('status', items.length > 0, warn || info, warn ? '#ff6b6b' : 'rgba(232, 238, 255, .55)');
+
+    const two = items.length > 4;
+    const max = two ? 8 : 4;
+    const bats = items.filter((x) => x.kind === 'battery' && x.entity).map((x) => x.entity).sort().join(',');
+    if (bats && (bats !== this._batIds || Date.now() - (this._batAt || 0) > 60 * 60 * 1000)) this._loadBat(bats);
+    this._el.hlist.classList.toggle('two', two);
+    const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+    const rows = items.length
+      ? items.slice(0, max).map((x) => `<button class="glass hi press ${x.level === 'warn' ? 'warn' : 'note'}" data-act="info" data-entity="${esc(x.entity)}">
+          <span class="i"><ha-icon icon="${esc(x.icon || 'mdi:alert-circle-outline')}"></ha-icon></span>
+          <span class="tt"><b>${esc(x.title)}</b><small>${esc(this._batTrend(x) + (x.detail || ''))}</small></span></button>`).join('')
+      : '<div class="hok"><ha-icon icon="mdi:shield-check-outline"></ha-icon>Alles in orde</div>';
+    this._set('hlist', this._el.hlist, rows);
+    this._set('hmore', this._el.hmore, items.length > max ? `en nog ${items.length - max}…` : '');
+    const part = (k, one, many) => (k ? `${k} ${k === 1 ? one : many}` : '');
+    const sub = [part(warn, 'probleem', 'problemen'), part(info, 'melding', 'meldingen')].filter(Boolean).join(' · ');
+    this._set('hsub', this._el.hsub, items.length ? sub : '<ha-icon icon="mdi:check-circle-outline"></ha-icon>alles in orde');
+    // A new problem: show it once, unless someone is using the screen.
+    if (prev != null && warn > prev && this._idx !== this._statusI && Date.now() > this._holdUntil && this._running) {
+      this._go(this._statusI, 1);
+    }
+  }
+
+  // Battery level 7 days ago for the battery notes on Status, from the recorder history (kept 10 days), hourly.
+  async _loadBat(ids) {
+    if (this._batLoading || !this._hass.callWS) return;
+    this._batLoading = true;
+    this._batIds = ids;
+    this._batAt = Date.now();
+    try {
+      const res = await this._hass.callWS({
+        type: 'history/history_during_period',
+        start_time: new Date(Date.now() - 7 * 86400000).toISOString(),
+        entity_ids: ids.split(','),
+        minimal_response: true,
+        no_attributes: true,
+        include_start_time_state: true,
+      });
+      const old = {};
+      for (const [id, list] of Object.entries(res || {})) {
+        const first = (list || []).find((e) => e && Number.isFinite(parseFloat(e.s)));
+        if (first) old[id] = { v: parseFloat(first.s), t: (first.lu || 0) * 1000 };
+      }
+      this._batOld = old;
+      this._cache.hlist = null; // re-render with the trend
+      this._health();
+    } catch (e) {
+      // keep the notes without a trend
+    } finally {
+      this._batLoading = false;
+    }
+  }
+
+  // "Afgelopen week −3 % (5 → 2 %). " for a battery note, '' when unknown.
+  _batTrend(x) {
+    if (x.kind !== 'battery' || !this._batOld) return '';
+    const o = this._batOld[x.entity];
+    const now = num(this._hass, x.entity);
+    if (!o || now == null) return '';
+    const days = Math.min(7, Math.max(1, Math.round((Date.now() - o.t) / 86400000)));
+    const span = days >= 7 ? 'Afgelopen week' : `Afgelopen ${days} ${days === 1 ? 'dag' : 'dagen'}`;
+    const d = Math.round(now - o.v);
+    if (d === 0) return `${span} gelijk gebleven (${Math.round(now)} %). `;
+    return `${span} ${d > 0 ? '+' : '−'}${Math.abs(d)} % (${Math.round(o.v)} → ${Math.round(now)} %). `;
   }
 
   _lights() {

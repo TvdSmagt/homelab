@@ -1,0 +1,115 @@
+{#- What is wrong in the house, for sensor.home_health (packages/health_monitor.yaml). Returns a JSON list of
+    {level: warn|info, icon, title, detail, entity[, kind]}, warnings first. kind 'battery' = a percentage
+    battery sensor; the panel puts its change over the last 7 days in front of the detail. A macro so the state (number of warnings)
+    and the attribute (the list) come from the same render. Checks and thresholds: docs/health-monitor.md. -#}
+{%- macro health_items() -%}
+  {%- set ns = namespace(w=[], i=[], demand=0) -%}
+  {%- set old = now() - timedelta(minutes=10) -%}
+  {%- set n = '%.1f' -%}
+  {#- ── Tado heating ── -#}
+  {%- set rooms = [
+        ('woonkamer', 'woonkamer_woonkamer', 'Woonkamer'),
+        ('beneden', 'beneden_beneden', 'Beneden'),
+        ('bibliotheek', 'bibliotheek_bibliotheek', 'Bibliotheek'),
+        ('kleine_kamer', 'kleine_kamer_kleine_kamer', 'Kleine kamer')] -%}
+  {%- for short, key, name in rooms -%}
+    {%- set c = 'climate.' ~ key -%}
+    {%- set cur = state_attr(c, 'current_temperature') -%}
+    {%- set tgt = state_attr(c, 'temperature') -%}
+    {%- set dem = states('sensor.' ~ short ~ '_warmtevraag_2u') -%}
+    {%- set rise = states('sensor.' ~ short ~ '_temperatuur_stijging_2u') -%}
+    {%- if is_number(dem) and dem | float >= 50 -%}
+      {%- set ns.demand = ns.demand + 1 -%}
+      {%- if is_number(rise) and rise | float < 0.3 and cur is number and tgt is number and cur <= tgt - 0.3 -%}
+        {%- set ns.w = ns.w + [{
+              'level': 'warn', 'icon': 'mdi:radiator-off', 'entity': c,
+              'title': name ~ ' warmt niet op',
+              'detail': 'Al 2 uur warmtevraag (gemiddeld ' ~ (dem | float | round(0) | int) ~ ' %), maar '
+                        ~ (n % cur) | replace('.', ',') ~ '° bij doel ' ~ (n % tgt) | replace('.', ',')
+                        ~ '° (' ~ ('%+.1f' % (rise | float)) | replace('.', ',') ~ '° in 2 uur). Raam open, kraan vast, lucht in de radiator?'}] -%}
+      {%- endif -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {#- ── Boiler: heat asked, no gas ── -#}
+  {%- set gas = states('sensor.gas_verbruik_3u') -%}
+  {%- if ns.demand > 0 and is_number(gas) and gas | float == 0 and has_value('sensor.gas_meter_gas_consumption') -%}
+    {%- set ns.w = ns.w + [{
+          'level': 'warn', 'icon': 'mdi:water-boiler-alert', 'entity': 'sensor.gas_meter_gas_consumption',
+          'title': 'CV-ketel brandt niet',
+          'detail': ns.demand ~ (' kamer vraagt' if ns.demand == 1 else ' kamers vragen') ~ ' al 2 uur warmte, maar de gasmeter staat al 3 uur stil. Kijk op de ketel: storingscode, waterdruk (1,5-2 bar).'}] -%}
+  {%- endif -%}
+  {#- ── Tado connection and batteries ── -#}
+  {%- set tado_climate = states.climate | selectattr('entity_id', 'in', integration_entities('tado')) | list -%}
+  {%- if tado_climate and tado_climate | rejectattr('state', 'eq', 'unavailable') | list | count == 0
+         and tado_climate | map(attribute='last_changed') | max < old -%}
+    {%- set ns.w = ns.w + [{
+          'level': 'warn', 'icon': 'mdi:cloud-off-outline', 'entity': tado_climate[0].entity_id,
+          'title': 'Tado onbereikbaar',
+          'detail': 'Home Assistant krijgt geen gegevens van Tado: internet, de Tado-cloud of de dagelijkse API-limiet.'}] -%}
+  {%- else -%}
+    {%- set kinds = {'VA01': 'Radiatorkraan', 'VA02': 'Radiatorkraan', 'RU01': 'Thermostaat', 'RU02': 'Thermostaat',
+                     'GW01': 'Tado-bridge', 'GW02': 'Tado-bridge', 'IB01': 'Tado-bridge', 'BR02': 'Tado-bridge'} -%}
+    {%- set cells = {'VA01': '2× AA', 'VA02': '2× AA', 'RU01': '3× AAA', 'RU02': '3× AAA'} -%}
+    {%- for e in integration_entities('tado') | select('match', 'binary_sensor\..*_(connection_state|battery)$') -%}
+      {%- set s = states[e] -%}
+      {%- set model = device_attr(e, 'model') -%}
+      {%- set user = device_attr(e, 'name_by_user') -%}
+      {#- Tado names devices by serial number; rename them in HA (e.g. "Kraan woonkamer") to see the room here. -#}
+      {%- set label = user or kinds.get(model, 'Tado-apparaat') -%}
+      {%- set serial = '' if user else device_attr(e, 'name') ~ ' · ' -%}
+      {%- if s and e.endswith('_connection_state') and s.state == 'off' and s.last_changed < old -%}
+        {%- set ns.w = ns.w + [{
+              'level': 'warn', 'icon': 'mdi:wifi-off', 'entity': e,
+              'title': label ~ ' geen verbinding',
+              'detail': serial ~ ('Alle Tado-apparaten zijn nu onbereikbaar: stroom en netwerkkabel van de bridge controleren.'
+                         if model in ['GW01', 'GW02', 'IB01', 'BR02'] else
+                         'Sinds ' ~ s.last_changed | as_local | as_timestamp | timestamp_custom('%d-%m %H:%M')
+                         ~ '. Meestal lege batterijen (' ~ cells.get(model, 'zie apparaat') ~ ', alkaline), anders te ver van de bridge.')}] -%}
+      {%- elif s and e.endswith('_battery') and s.state == 'on' -%}
+        {%- set ns.i = ns.i + [{
+              'level': 'info', 'icon': 'mdi:battery-low', 'entity': e,
+              'title': label ~ ': batterij bijna leeg',
+              'detail': serial ~ 'Vervangen door ' ~ cells.get(model, 'nieuwe batterijen') ~ ' (alkaline, geen oplaadbare).'}] -%}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endif -%}
+  {#- ── Hue bridge, switches, lamps ── -#}
+  {%- set hue = integration_entities('hue') -%}
+  {%- set lamps = states.light | selectattr('entity_id', 'in', hue) | rejectattr('attributes.is_hue_group', 'eq', true) | list -%}
+  {%- if lamps and lamps | rejectattr('state', 'eq', 'unavailable') | list | count == 0
+         and lamps | map(attribute='last_changed') | max < old -%}
+    {%- set ns.w = ns.w + [{
+          'level': 'warn', 'icon': 'mdi:bridge', 'entity': lamps[0].entity_id,
+          'title': 'Hue Bridge onbereikbaar',
+          'detail': 'Geen enkele lamp of schakelaar reageert. Stroom en netwerkkabel van de Hue Bridge controleren.'}] -%}
+  {%- else -%}
+    {%- set cells = {'RWL020': 'CR2450', 'RWL021': 'CR2450', 'RWL022': 'CR2032', 'RDM001': 'CR2450',
+                     'RDM002': 'CR2032', 'RDM003': 'CR2032', 'ROM001': 'CR2032', 'SML001': '2× AAA',
+                     'SML002': '2× AAA', 'SML003': '2× AAA', 'SML004': '2× AAA'} -%}
+    {%- for e in hue | select('match', 'sensor\..*_battery$') -%}
+      {%- set s = states[e] -%}
+      {%- set name = device_attr(e, 'name_by_user') or device_attr(e, 'name') -%}
+      {%- set cell = cells.get(device_attr(e, 'model_id'), 'zie achterkant') -%}
+      {%- if s and s.state == 'unavailable' and s.last_changed < old -%}
+        {%- set ns.w = ns.w + [{
+              'level': 'warn', 'icon': 'mdi:light-switch-off', 'entity': e,
+              'title': name ~ ' geen verbinding',
+              'detail': 'Sinds ' ~ s.last_changed | as_local | as_timestamp | timestamp_custom('%d-%m %H:%M')
+                        ~ '. Meestal is de batterij leeg: ' ~ cell ~ '. Anders te ver van een lamp of de bridge.'}] -%}
+      {%- elif s and is_number(s.state) and s.state | int <= 5 -%}
+        {%- set ns.i = ns.i + [{
+              'level': 'info', 'icon': 'mdi:battery-10', 'entity': e, 'kind': 'battery',
+              'title': name ~ ': batterij ' ~ s.state ~ ' %',
+              'detail': 'Nieuwe batterij: ' ~ cell ~ '.'}] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {%- set lamp_old = now() - timedelta(minutes=30) -%}
+    {%- for s in lamps | selectattr('state', 'eq', 'unavailable') | selectattr('last_changed', 'lt', lamp_old) -%}
+      {%- set ns.i = ns.i + [{
+            'level': 'info', 'icon': 'mdi:lightbulb-off-outline', 'entity': s.entity_id,
+            'title': s.name ~ ' onbereikbaar',
+            'detail': 'Krijgt geen stroom (wandschakelaar uit?) of valt buiten bereik.'}] -%}
+    {%- endfor -%}
+  {%- endif -%}
+  {{- (ns.w + ns.i) | to_json -}}
+{%- endmacro -%}

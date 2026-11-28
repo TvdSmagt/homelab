@@ -15,7 +15,7 @@ out=${OUT:-/tmp/panel-preview}
 browser=$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)
 [ -n "$browser" ] || { echo "Chromium not found (sudo apt install chromium)" >&2; exit 1; }
 
-if [ $# -gt 0 ]; then slides=("$@"); else slides=(nu energie vandaag verleden weer klimaat lampen); fi
+if [ $# -gt 0 ]; then slides=("$@"); else slides=(nu energie vandaag verleden weer klimaat lampen status); fi
 mkdir -p "$out"
 for s in "${slides[@]}"; do
   profile=$(mktemp -d)
