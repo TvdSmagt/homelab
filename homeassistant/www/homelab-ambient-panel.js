@@ -15,7 +15,7 @@
 //   Vandaag      one 24-hour graph: solar vs house power (left axis), the energy score over the preceding 24 hours
 //                with its two parts (right axis) and the dynamic price per hour as tinted bars behind; today's totals
 //   Verleden     the last 7 days: fixed vs dynamic contract (since the start and per day), the energy score per
-//                day with its two parts, and usage per day (solar, import, export, gas)
+//                day with its two parts, and usage per hour as a graph (solar, import, export, gas) with day totals
 //   Weer         forecast for the next 12 hours and the next days (weather entity, subscribed over the websocket),
 //                and the rain next 2 hours (Buienradar / KNMI radar) as a graph at the bottom
 //   Klimaat      all Tado rooms with big - / + (debounced, Tado has API limits), hot water, and gas use
@@ -537,14 +537,18 @@ canvas.on { opacity: 1; }
 .sbars .s { background: var(--solar); opacity: .8; }
 .sbars .p { background: var(--grid); opacity: .8; }
 .puse { flex: 1; }
-.udays { flex: 1; min-height: 0; display: flex; gap: 16px; margin-top: 6px; }
-.udays > div { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.ubars { flex: 1; min-height: 0; display: flex; gap: 4px; border-bottom: 1px solid var(--faint); }
-.ubars > div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
-.ubars em { font-style: normal; font-size: 12.5px; color: var(--muted); white-space: nowrap; margin-bottom: 2px; }
-.ubars i { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--bc); transition: height 1s ease; }
-.ufoot { display: flex; justify-content: space-between; align-items: baseline; }
-.ufoot em { font-style: normal; font-size: 14px; color: var(--heat); white-space: nowrap; }
+.puse .gplot { margin-top: 8px; --sc: var(--heat); }
+.u-day { stroke: rgba(255, 255, 255, .09); stroke-width: 1; }
+.u-solar { fill: url(#usolar); stroke: var(--solar); stroke-width: 2; }
+.u-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.u-im { stroke: var(--grid); }
+.u-ex { stroke: var(--export); }
+.u-gas { stroke: var(--heat); stroke-width: 2.5; }
+.udays { flex: none; display: flex; margin: 3px 46px 0; }
+.udays > div { flex: 1; min-width: 0; text-align: center; white-space: nowrap; font-size: 14px; color: var(--muted); line-height: 1.25; }
+.udays > div.now { color: var(--text); font-weight: 500; }
+.udays small { display: block; font-size: 12.5px; font-weight: 400; }
+.udays small b { font-weight: 400; margin: 0 2px; }
 
 /* ── Weer ── */
 .wcard { padding: 12px 20px 10px; display: flex; flex-direction: column; text-align: left; min-height: 0; }
@@ -871,8 +875,22 @@ class HomelabAmbientPanel extends HTMLElement {
             </div>
           </div>
           <div class="glass pcard puse">
-            <div class="gtop"><span class="label">Verbruik per dag</span>
-              <span class="vleg"><span><i style="background:var(--solar)"></i>zon</span><span><i style="background:var(--grid)"></i>afgenomen</span><span><i style="background:var(--export)"></i>teruggeleverd</span><span style="color:var(--heat)">gas m³</span></span></div>
+            <div class="gtop"><span class="label">Verbruik per uur</span>
+              <span class="vleg"><span><i style="background:var(--solar)"></i>zon</span><span><i style="background:var(--grid)"></i>afgenomen</span><span><i style="background:var(--export)"></i>teruggeleverd</span><span style="color:var(--muted)">kWh</span><span><i style="background:var(--heat)"></i>gas</span><span style="color:var(--heat)">m³</span></span></div>
+            <div class="gplot">
+              <svg viewBox="0 0 ${GW} ${GH}" preserveAspectRatio="none">
+                <defs><linearGradient id="usolar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb938" stop-opacity=".5"/><stop offset="1" stop-color="#ffb938" stop-opacity=".04"/></linearGradient></defs>
+                <g id="u-days"></g>
+                <line class="g-guide" x1="0" y1="${gy(0.5)}" x2="${GW}" y2="${gy(0.5)}" vector-effect="non-scaling-stroke"/>
+                <line class="g-guide" x1="0" y1="${gy(1)}" x2="${GW}" y2="${gy(1)}" vector-effect="non-scaling-stroke"/>
+                <line class="g-base" x1="0" y1="${GH - 0.5}" x2="${GW}" y2="${GH - 0.5}" vector-effect="non-scaling-stroke"/>
+                <path id="u-solar" class="u-solar" vector-effect="non-scaling-stroke"/>
+                <path id="u-gas" class="u-line u-gas" vector-effect="non-scaling-stroke"/>
+                <path id="u-im" class="u-line u-im" vector-effect="non-scaling-stroke"/>
+                <path id="u-ex" class="u-line u-ex" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <div class="gy l" id="uyl"></div><div class="gy r" id="uyr"></div>
+            </div>
             <div class="udays" id="past-use"></div>
           </div>`)}
 
@@ -2199,9 +2217,15 @@ class HomelabAmbientPanel extends HTMLElement {
       for (const r of means[c.price_now] || []) if (typeof r.mean === 'number') price.set(ms(r), r.mean);
       for (const [t, p] of this._hourPrices()) price.set(t, p);
       const days = starts.slice(0, D).map((t) => ({ t, so: null, im: null, ex: null, gas: null, fx: null, dy: null, n: 0, ip: 0, co: 0, ps: [] }));
+      const H = 3600000;
+      const NH = Math.round((starts[D] - starts[0]) / H);
+      const hours = { t0: starts[0], t1: starts[D], so: [], im: [], ex: [], gas: [] };
+      for (const k of ['so', 'im', 'ex', 'gas']) hours[k] = new Array(NH).fill(null);
       for (const [k, id] of Object.entries(keys)) {
         for (const r of sums[id] || []) {
           const t = ms(r);
+          const hi = Math.floor((t - starts[0]) / H);
+          if (hours[k] && hi >= 0 && hi < NH && typeof r.change === 'number') hours[k][hi] = (hours[k][hi] || 0) + Math.max(r.change, 0);
           const i = starts.findIndex((s, j) => j < D && t >= s && t < starts[j + 1]);
           if (i < 0 || typeof r.change !== 'number') continue;
           const d = days[i];
@@ -2218,6 +2242,17 @@ class HomelabAmbientPanel extends HTMLElement {
         }
       }
       this._past = days.map(({ ip, co, ps, ...d }) => ({ ...d, pr: priceTiming(ip, co, ps) }));
+      // The gas meter reports a few seconds before or after the full hour, so an hour can hold two readings and the
+      // next none (see _loadGas): a zigzag between 0 and double. Smoothing over three hours (1/4, 1/2, 1/4) evens it
+      // out and keeps the total.
+      const g = hours.gas;
+      hours.gas = g.map((v, i) => {
+        if (v == null) return null;
+        const a = g[i - 1] ?? v;
+        const b = g[i + 1] ?? v;
+        return 0.25 * a + 0.5 * v + 0.25 * b;
+      });
+      this._pastH = hours;
       this._cache.past = null;
       this._pastRender();
     } catch (err) {
@@ -2281,15 +2316,54 @@ class HomelabAmbientPanel extends HTMLElement {
       })
       .join('');
 
-    // Usage per day: solar, import, export on one kWh scale, gas as a number.
+    // Usage per hour over the days: solar (area), import and export (lines) in kWh on the left axis, gas in m³ on
+    // the right. Hours without statistics (the last hour or so, the rest of today) break the line. Under each day
+    // its totals, today's from the live daily counters.
+    const H = this._pastH;
+    if (H) {
+      const NH = H.so.length;
+      const xh = (i) => (((i + 0.5) / NH) * GW).toFixed(1);
+      const nice = (m, step) => Math.max(step, Math.ceil(m / step) * step);
+      const kTop = nice(Math.max(0, ...H.so, ...H.im, ...H.ex), 0.5);
+      const gTop = nice(Math.max(0, ...H.gas), 0.1);
+      const path = (vals, top) => {
+        let d = '';
+        let on = false;
+        vals.forEach((v, i) => {
+          if (v == null) { on = false; return; }
+          d += `${on ? 'L' : 'M'}${xh(i)} ${gy(clamp(v / top, 0, 1)).toFixed(1)}`;
+          on = true;
+        });
+        return d;
+      };
+      // Solar as an area per run of known hours, closed to the baseline.
+      let area = '';
+      let run = [];
+      const close = () => {
+        if (run.length) area += `M${xh(run[0])} ${GH}${run.map((i) => `L${xh(i)} ${gy(clamp(H.so[i] / kTop, 0, 1)).toFixed(1)}`).join('')}L${xh(run[run.length - 1])} ${GH}Z`;
+        run = [];
+      };
+      H.so.forEach((v, i) => (v == null ? close() : run.push(i)));
+      close();
+      e['u-solar'].setAttribute('d', area);
+      e['u-im'].setAttribute('d', path(H.im, kTop));
+      e['u-ex'].setAttribute('d', path(H.ex, kTop));
+      e['u-gas'].setAttribute('d', path(H.gas, gTop));
+      e['u-days'].innerHTML = Array.from({ length: D - 1 }, (_, k) => {
+        const xd = (((p[k + 1].t - H.t0) / (H.t1 - H.t0)) * GW).toFixed(1);
+        return `<line class="u-day" x1="${xd}" y1="0" x2="${xd}" y2="${GH}" vector-effect="non-scaling-stroke"/>`;
+      }).join('');
+      const pos = (f) => `top:${((gy(f) / GH) * 100).toFixed(2)}%`;
+      e.uyl.innerHTML = [0.5, 1].map((f) => `<span style="${pos(f)}">${fmt(kTop * f, kTop * f < 1 ? 2 : 1)}</span>`).join('');
+      e.uyr.innerHTML = [0.5, 1].map((f) => `<span style="${pos(f)}">${fmt(gTop * f, 2)}</span>`).join('');
+    }
     const use = p.map((d, i) => (i === last ? { ...d, ...Object.fromEntries(Object.entries(live).filter(([, v]) => v != null)) } : d));
-    const umax = Math.max(1, ...use.flatMap((d) => [d.so || 0, d.im || 0, d.ex || 0]));
-    const col = (v, bc) => `<div><em>${v == null ? '' : fmt(v, 1)}</em><i style="height:${v == null ? 0 : Math.max(2, (v / umax) * 80).toFixed(0)}%;--bc:${bc}"></i></div>`;
+    const tot = (v, col) => `<b style="color:${col}">${v == null ? '–' : fmt(v, 1)}</b>`;
     e['past-use'].innerHTML = use
       .map((d, i) => {
         const dt = new Date(d.t).toLocaleDateString(NL, { weekday: 'short', day: 'numeric' }).replace('.', '');
-        return `<div><div class="ubars">${col(d.so, 'var(--solar)')}${col(d.im, 'var(--grid)')}${col(d.ex, 'var(--export)')}</div>
-          <div class="ufoot"><span class="${i === last ? 'now' : ''}">${i === last ? 'vandaag' : dt}</span><em>${d.gas == null ? '' : fmt(d.gas, 1)}</em></div></div>`;
+        return `<div class="${i === last ? 'now' : ''}">${i === last ? 'vandaag' : dt}
+          <small>${tot(d.so, 'var(--solar)')}${tot(d.im, 'var(--grid)')}${tot(d.ex, 'var(--export)')}${tot(d.gas, 'var(--heat)')}</small></div>`;
       })
       .join('');
   }
