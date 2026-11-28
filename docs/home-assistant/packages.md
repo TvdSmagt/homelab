@@ -14,7 +14,8 @@ its header comment explains it.
 **Macros** (`custom_templates/`): `health.jinja` → `health_items()`; `energy_contract.jinja` → `hour_price()`,
 `cost_state()`. Import with `{% from 'health.jinja' import health_items %}`; lists go out as `to_json`, in as `from_json`.
 
-**Dashboards**: *Nest Hub* (`/nest-hub/thuis`, the full-screen panel `homelab-ambient-panel.js`) and *Contract*.
+**Dashboards**: *Nest Hub* (`/nest-hub/thuis`, the full-screen panel `homelab-ambient-panel.js`), *Contract*, and
+*Docs* (`/homelab-docs/docs`, this site in an iframe).
 Cards are plain JS custom elements, no build step.
 
 **New package:** header comment, a `unique_id` on every entity, a `state_class` if history should last, then check

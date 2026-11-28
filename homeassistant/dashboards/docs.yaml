@@ -1,0 +1,11 @@
+# "Docs" dashboard: the documentation site (docs/, served by Caddy, see docs/about-docs.md) inside Home Assistant.
+# HTTPS URL so it also loads when HA itself is opened over HTTPS (no mixed content).
+title: Docs
+views:
+  - title: Docs
+    path: docs
+    panel: true
+    cards:
+      - type: iframe
+        url: https://docs.tijs-homelab.duckdns.org/
+        aspect_ratio: 100%

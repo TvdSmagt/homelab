@@ -2,7 +2,8 @@
 
 Markdown in `docs/`, menu in `zensical.toml`, built by [Zensical](https://zensical.org) and served by Caddy from
 `data/docs-site/` at `https://docs.NAME.duckdns.org` (same certificate setup as [https.md](https.md)), with
-`http://home-pi.local:8000` as a fallback. No container runs for the docs.
+`http://home-pi.local:8000` as a fallback, and in Home Assistant as the *Docs* sidebar item (an iframe dashboard,
+`homeassistant/dashboards/docs.yaml`). No container runs for the docs.
 
 ```sh
 scripts/docs.sh          # build (publish)
